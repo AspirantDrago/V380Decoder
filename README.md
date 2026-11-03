@@ -31,6 +31,24 @@ Run the decryption, SDP, RTP transport, and snapshot color regression tests:
 dotnet test tests/V380Decoder.Tests/V380Decoder.Tests.csproj --configuration Release
 ```
 
+## Audio compatibility
+
+Legacy `0x1A` G.711 A-law audio passes through unchanged. For `0x16` audio,
+the decoder recognizes complete 256-byte mono IMA/DVI ADPCM blocks, decrypts
+at the media boundary (16/18/20-byte transport header), and converts each
+block to 505 PCMA samples. RTSP continues to advertise `PCMA/8000/1`, so
+clients need no ADPCM support. This conversion is in-process and does not
+require FFmpeg. `--output audio` also emits A-law for recognized IMA frames.
+
+The same valid block layout must occur on two consecutive frames before
+sound is forwarded. Unsupported layouts stay muted and produce an
+`[AUDIO] unsupported 0x16 layout bytes=...` diagnostic. Successful detection
+logs `[AUDIO] type=0x16 codec=IMA-ADPCM header=... output=PCMA/8000/1`.
+
+The previous `0x16` path discarded 20 bytes before AES decryption and skipped
+RTSP audio entirely. Cameras with a 16-byte transport header consequently
+lost four media bytes and decrypted misaligned AES blocks.
+
 ## Tested Cameras
 
 H.264 device-version-31 cameras and encrypted H.265 device-version-32

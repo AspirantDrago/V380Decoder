@@ -24,6 +24,7 @@ namespace V380Decoder.src
         private bool needReconnect = false;
         private DeviceInfo deviceInfo;
         private readonly VideoPayloadDecoder videoPayloadDecoder;
+        private readonly AudioPayloadDecoder audioPayloadDecoder;
         private bool reportedExtendedAudio;
 
 
@@ -38,6 +39,7 @@ namespace V380Decoder.src
             this.mode = mode;
             this.enableMjpeg = enableMjpeg;
             videoPayloadDecoder = new VideoPayloadDecoder(aesKey);
+            audioPayloadDecoder = new AudioPayloadDecoder(aesKey);
             snapshotManager = new SnapshotManager();
             snapshotManager.SetMjpegActive(enableMjpeg);
         }
@@ -316,6 +318,8 @@ namespace V380Decoder.src
             }
 
             videoPayloadDecoder.Reset(communicationVersion);
+            audioPayloadDecoder.Reset();
+            reportedExtendedAudio = false;
 
             if (deviceVersion > 30) GenerateMediaKey(authTicket);
             Console.Error.WriteLine($"[STREAM] login OK communicationVersion={communicationVersion}");
@@ -397,8 +401,8 @@ namespace V380Decoder.src
                         continue;
                     }
 
-                    // 0x1A is the legacy PCMA stream. Type 0x16 has a
-                    // four-byte-longer inner header and is used by newer models.
+                    // 0x1A is legacy PCMA. Type 0x16 can carry IMA ADPCM;
+                    // select its media offset before decrypting, not after.
                     if (type is 0x1A or 0x16)
                     {
                         if (audioAssembler.TryAppend(
@@ -484,23 +488,44 @@ namespace V380Decoder.src
             RtspServer rtsp,
             Stream stdout)
         {
-            int headerSize = rawType == 0x16 ? 20 : 16;
-            if (full.Length <= headerSize) return;
+            if (full.Length <= 16) return;
 
             uint frameId = ReadUInt32LE(full, 0);
             ushort frameType = ReadUInt16LE(full, 4);
             ushort frameRate = ReadUInt16LE(full, 6);
             ulong timestamp = ReadUInt64LE(full, 8);
 
-            byte[] payload = new byte[full.Length - headerSize];
-            Array.Copy(full, headerSize, payload, 0, payload.Length);
-
-            if (needDecrypt)
+            byte[] payload;
+            if (rawType == 0x16)
             {
-                if (communicationVersion == 21)
-                    DecryptMediaPre2k(payload, payload.Length, 1);
-                else
-                    DecryptAudioFrame(payload, payload.Length);
+                if (!audioPayloadDecoder.TryDecodeIma(full, needDecrypt, out payload, out bool changed))
+                {
+                    if (audioPayloadDecoder.HeaderSize == 0 && !reportedExtendedAudio)
+                    {
+                        Console.Error.WriteLine(
+                            $"[AUDIO] unsupported 0x16 layout bytes={full.Length} " +
+                            $"communicationVersion={communicationVersion}; expected mono IMA blocks");
+                        reportedExtendedAudio = true;
+                    }
+                    return;
+                }
+                if (changed)
+                {
+                    Console.Error.WriteLine(
+                        $"[AUDIO] type=0x16 codec=IMA-ADPCM header={audioPayloadDecoder.HeaderSize} " +
+                        $"decrypt={audioPayloadDecoder.Decrypts} output=PCMA/8000/1");
+                }
+            }
+            else
+            {
+                payload = full[16..];
+                if (needDecrypt)
+                {
+                    if (communicationVersion == 21)
+                        DecryptMediaPre2k(payload, payload.Length, 1);
+                    else
+                        DecryptAudioFrame(payload, payload.Length);
+                }
             }
 
             if (outputMode == OutputMode.Audio)
@@ -511,17 +536,6 @@ namespace V380Decoder.src
             }
 
             if (outputMode != OutputMode.Rtsp) return;
-
-            if (rawType == 0x16)
-            {
-                if (!reportedExtendedAudio)
-                {
-                    Console.Error.WriteLine(
-                        "[AUDIO] type 0x16 received; RTSP output is skipped because it is not PCMA");
-                    reportedExtendedAudio = true;
-                }
-                return;
-            }
 
             rtsp?.PushAudio(new FrameData
             {

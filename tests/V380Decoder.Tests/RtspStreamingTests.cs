@@ -83,7 +83,8 @@ public class RtspStreamingTests
 
             session.PushAudio(new FrameData { Payload = new byte[200], Timestamp = 999 });
             session.PushAudio(new FrameData { Payload = new byte[160], Timestamp = 0 });
-            foreach (uint expected in new uint[] { 0, 160, 200 })
+            session.PushAudio(new FrameData { Payload = new byte[505], Timestamp = 0 });
+            foreach (uint expected in new uint[] { 0, 160, 200, 360, 520, 680, 840 })
             {
                 var (channel, rtp) = await ReadPacket(stream);
                 Assert.Equal(10, channel);

@@ -12,6 +12,25 @@ This is a port of [prsyahmi/v380](https://github.com/prsyahmi/v380) with signifi
 - ✅ H.265/HEVC streams (`0x28` keyframes and `0x29` inter frames)
 - ✅ Automatic media decryption layout detection for protocol versions 20/21
 
+## Upstream synchronization
+
+This fork includes upstream changes through `14cb20f` while retaining the
+encrypted HEVC/cloud-stream decoder, automatic 16/20-byte header detection,
+and protocol 20/21 decryption selection. H.265 RTP payload type 97 matches
+its SDP description; legacy H.264 uses payload type 96.
+
+RTSP uses increasing video/audio clocks even when camera timestamps repeat
+or go backwards. Video uses the frame header rate when valid, otherwise
+12 fps. MJPEG decoding uses an ordered, bounded background queue so FFmpeg
+backpressure cannot block camera reception; after overflow it resumes at
+a keyframe.
+
+Run the decryption, SDP, RTP transport, and snapshot color regression tests:
+
+```bash
+dotnet test tests/V380Decoder.Tests/V380Decoder.Tests.csproj --configuration Release
+```
+
 ## Tested Cameras
 
 H.264 device-version-31 cameras and encrypted H.265 device-version-32
@@ -54,7 +73,7 @@ camera format, so logs from additional models are welcome.
 
 ## Usage Examples
 
-Download Latest [Release](https://github.com/PyanSofyan/V380decoder/releases/latest)
+Download Latest [Release](https://github.com/AspirantDrago/V380Decoder/releases/latest)
 
 ### Find Camera Device
 ```bash
@@ -193,7 +212,7 @@ curl http://192.168.1.3:8080/api/status
 
 2. **Clone repository**
    ```bash
-   git clone https://github.com/PyanSofyan/V380Decoder.git
+   git clone https://github.com/AspirantDrago/V380Decoder.git
    cd V380Decoder
    ```
 

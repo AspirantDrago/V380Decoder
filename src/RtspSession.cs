@@ -23,6 +23,9 @@ namespace V380Decoder.src
         private uint videoSsrc = (uint)new Random().Next();
         private uint audioSsrc = (uint)new Random().Next();
 
+        // Camera timestamps can repeat or jump backwards (firmware v32).
+        private uint videoRtpClock, audioRtpClock;
+
         public event Action OnClose;
 
         public RtspSession(int id, TcpClient tcp, RtspServer server, bool secure = false)
@@ -203,8 +206,10 @@ namespace V380Decoder.src
         {
             if (!playing) return;
 
-            // RTP timestamp: 90000 Hz, camera timestamp in milliseconds
-            uint rts = (uint)(f.Timestamp * 90);
+            // Advance once per access unit; use the advertised rate, or 12 fps.
+            uint tick = f.FrameRate is > 0 and <= 120 ? 90000u / f.FrameRate : 7500u;
+            videoRtpClock += tick;
+            uint rts = videoRtpClock;
             var nals = new List<byte[]>();
             RtspServer.ParseNals(f.Payload, f.Codec, (_, nal) => nals.Add(nal));
 
@@ -308,44 +313,48 @@ namespace V380Decoder.src
         {
             if (!playing) return;
 
-            // RTP timestamp: 8000 Hz, camera timestamp in milliseconds
-            uint rts = (uint)(f.Timestamp * 8);
-
-            // Send in 20 ms chunks = 160 samples at 8 kHz
+            // Use synthetic RTP timestamps to prevent DTS discontinuities
+            // 160 samples per chunk at 8 kHz = 20 ms of audio per RTP packet
             const int CHUNK = 160;
             for (int off = 0; off < f.Payload.Length; off += CHUNK)
             {
                 int len = Math.Min(CHUNK, f.Payload.Length - off);
-                SendRtp(audioCh, 8, audioSeq++, rts, audioSsrc,
+                SendRtp(audioCh, 8, audioSeq++, audioRtpClock, audioSsrc,
                         f.Payload, off, len, marker: false);
-                rts += (uint)len; // advance timestamp by samples sent
+                audioRtpClock += (uint)len;
             }
         }
 
-        // ── Low-level RTP sender with RTSP interleaved framing ───
-        // RFC 2326 §10.12:  $ | channel (1B) | length (2B BE) | RTP packet
         void SendRtp(byte channel, byte pt, ushort seq, uint ts, uint ssrc,
                      byte[] payload, int offset, int length, bool marker)
         {
-            var rtp = new byte[12 + length];
-            rtp[0] = 0x80;
-            rtp[1] = (byte)((marker ? 0x80 : 0) | (pt & 0x7F));
-            rtp[2] = (byte)(seq >> 8);
-            rtp[3] = (byte)seq;
-            rtp[4] = (byte)(ts >> 24); rtp[5] = (byte)(ts >> 16);
-            rtp[6] = (byte)(ts >> 8); rtp[7] = (byte)ts;
-            rtp[8] = (byte)(ssrc >> 24); rtp[9] = (byte)(ssrc >> 16);
-            rtp[10] = (byte)(ssrc >> 8); rtp[11] = (byte)ssrc;
-            Array.Copy(payload, offset, rtp, 12, length);
+            int rtpLen = 12 + length;
+            var frame = new byte[4 + rtpLen];
 
-            var frame = new byte[4 + rtp.Length];
             frame[0] = 0x24; // '$'
             frame[1] = channel;
-            frame[2] = (byte)(rtp.Length >> 8);
-            frame[3] = (byte)rtp.Length;
-            Array.Copy(rtp, 0, frame, 4, rtp.Length);
+            frame[2] = (byte)(rtpLen >> 8);
+            frame[3] = (byte)rtpLen;
 
-            try { lock (ns) { ns.Write(frame, 0, frame.Length); ns.Flush(); } }
+            frame[4] = 0x80;
+            frame[5] = (byte)((marker ? 0x80 : 0) | (pt & 0x7F));
+            frame[6] = (byte)(seq >> 8);
+            frame[7] = (byte)seq;
+            frame[8] = (byte)(ts >> 24);
+            frame[9] = (byte)(ts >> 16);
+            frame[10] = (byte)(ts >> 8);
+            frame[11] = (byte)ts;
+            frame[12] = (byte)(ssrc >> 24);
+            frame[13] = (byte)(ssrc >> 16);
+            frame[14] = (byte)(ssrc >> 8);
+            frame[15] = (byte)ssrc;
+
+            Array.Copy(payload, offset, frame, 16, length);
+
+            try
+            {
+                lock (ns) { ns.Write(frame, 0, frame.Length); }
+            }
             catch { alive = false; }
         }
     }

@@ -33,13 +33,15 @@ namespace V380Decoder.src
         private Stream _ffmpegStdin;
         private VideoCodec? _ffmpegCodec;
         private bool _ffmpegAwaitingKeyframe = true;
+        private bool _queueAwaitingKeyframe = true;
+        private readonly Task _decodeTask;
 
         // Frame queue 
-        private readonly System.Threading.Channels.Channel<(byte[] data, bool isIFrame)> _queue =
-        System.Threading.Channels.Channel.CreateBounded<(byte[], bool)>(
+        private readonly System.Threading.Channels.Channel<(byte[] data, bool isIFrame, VideoCodec codec, bool restart)> _queue =
+        System.Threading.Channels.Channel.CreateBounded<(byte[], bool, VideoCodec, bool)>(
         new System.Threading.Channels.BoundedChannelOptions(30)
         {
-            FullMode = System.Threading.Channels.BoundedChannelFullMode.DropOldest,
+            FullMode = System.Threading.Channels.BoundedChannelFullMode.Wait,
             SingleReader = true
         });
 
@@ -59,7 +61,7 @@ namespace V380Decoder.src
             if (!_useFFmpeg)
                 _decoder = new H264Decoder();
 
-            Task.Run(() => DecodeLoop(_cts.Token));
+            _decodeTask = Task.Run(() => DecodeLoop(_cts.Token));
         }
 
         // ── public API ────────────────────────────────────────────
@@ -69,8 +71,7 @@ namespace V380Decoder.src
             _mjpegActive = active;
             LogUtils.debug($"[SNAP] MJPEG {(active ? "enable" : "disabled")}");
 
-            if (active && _useFFmpeg && _codecKnown)
-                EnsureFFmpegPipe(_codec);
+            if (!active) _queueAwaitingKeyframe = true;
         }
 
         public void UpdateFrame(
@@ -98,6 +99,8 @@ namespace V380Decoder.src
                 }
             }
 
+            if (codecChanged) _queueAwaitingKeyframe = true;
+
             if (codecChanged)
                 LogUtils.debug($"[SNAP] codec={codec}");
 
@@ -110,39 +113,27 @@ namespace V380Decoder.src
 
             if (!_mjpegActive) return;
 
-            if (_useFFmpeg)
+            if (!_useFFmpeg && codec == VideoCodec.H265)
             {
-                try
-                {
-                    EnsureFFmpegPipe(codec);
-                    lock (_ffmpegLock)
-                    {
-                        if (_ffmpegAwaitingKeyframe && !isIFrame)
-                            return;
-
-                        byte[] pipeFrame = isIFrame && HasParameterSets(codec)
-                            ? PrependParameterSets(frame, codec)
-                            : frame;
-
-                        _ffmpegAwaitingKeyframe = false;
-                        _ffmpegStdin?.Write(pipeFrame, 0, pipeFrame.Length);
-                        _ffmpegStdin?.Flush();
-                    }
-                }
-                catch (Exception ex) { LogUtils.debug($"[SNAP] FFmpeg write error: {ex.Message}"); }
-            }
-            else
-            {
-                if (codec == VideoCodec.H264)
-                {
-                    _queue.Writer.TryWrite(((byte[])frame.Clone(), isIFrame));
-                }
-                else if (!_reportedMissingHevcDecoder)
+                if (!_reportedMissingHevcDecoder)
                 {
                     Console.Error.WriteLine("[SNAP] FFmpeg is required to decode H.265 snapshots");
                     _reportedMissingHevcDecoder = true;
                 }
+                return;
             }
+
+            if (_queueAwaitingKeyframe && !isIFrame) return;
+
+            byte[] input = isIFrame && HasParameterSets(codec)
+                ? PrependParameterSets(frame, codec)
+                : (byte[])frame.Clone();
+            // Keep camera reception independent of decoder/pipe backpressure.
+            // After an overflow, resume at a keyframe instead of decoding a gap.
+            if (_queue.Writer.TryWrite((input, isIFrame, codec, _queueAwaitingKeyframe)))
+                _queueAwaitingKeyframe = false;
+            else
+                _queueAwaitingKeyframe = true;
         }
 
         public byte[] GetSnapshot()
@@ -214,15 +205,27 @@ namespace V380Decoder.src
 
         private async Task DecodeLoop(CancellationToken ct)
         {
-            if (_useFFmpeg)
-                return;
-
             try
             {
-                await foreach (var (data, isIFrame) in _queue.Reader.ReadAllAsync(ct))
+                await foreach (var (data, isIFrame, codec, restart) in _queue.Reader.ReadAllAsync(ct))
                 {
+                    ct.ThrowIfCancellationRequested();
                     try
                     {
+                        if (_useFFmpeg)
+                        {
+                            if (restart)
+                            {
+                                lock (_ffmpegLock) StopFFmpegPipe();
+                            }
+                            EnsureFFmpegPipe(codec);
+                            if (_ffmpegAwaitingKeyframe && !isIFrame) continue;
+                            await _ffmpegStdin.WriteAsync(data, ct);
+                            await _ffmpegStdin.FlushAsync(ct);
+                            _ffmpegAwaitingKeyframe = false;
+                            continue;
+                        }
+
                         var jpeg = DecodeH264Sharp(data, isIFrame);
                         if (jpeg != null)
                         {
@@ -232,6 +235,7 @@ namespace V380Decoder.src
                     }
                     catch (Exception ex)
                     {
+                        _ffmpegAwaitingKeyframe = true;
                         LogUtils.debug($"[SNAP] DecodeLoop error: {ex.Message}");
                     }
                 }
@@ -504,9 +508,9 @@ namespace V380Decoder.src
             return ms.ToArray();
         }
 
-        private static byte[] ToJpeg(byte[] bgr, int w, int h)
+        internal static byte[] ToJpeg(byte[] bgr, int w, int h)
         {
-            using var img = Image.LoadPixelData<Rgb24>(bgr, w, h);
+            using var img = Image.LoadPixelData<Bgr24>(bgr, w, h);
             using var ms = new MemoryStream();
             img.Save(ms, new JpegEncoder { Quality = 80 });
             return ms.ToArray();
@@ -551,7 +555,8 @@ namespace V380Decoder.src
         public void Dispose()
         {
             _cts.Cancel();
-            _queue.Writer.Complete();
+            _queue.Writer.TryComplete();
+            _decodeTask.GetAwaiter().GetResult();
 
             lock (_ffmpegLock)
                 StopFFmpegPipe();

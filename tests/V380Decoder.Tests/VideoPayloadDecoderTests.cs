@@ -60,6 +60,23 @@ public class VideoPayloadDecoderTests
         Assert.Equal(VideoDecryptMode.FullBlocks, decoder.SelectedMode);
     }
 
+    [Theory]
+    [InlineData(16, 3, 0)]
+    [InlineData(16, 4, 8)]
+    [InlineData(20, 3, 0)]
+    public void PreservesLegacyH264WithPaddingAndBothStartCodes(int headerSize, int startCodeSize, int padding)
+    {
+        byte[] nal = [0x65, 0x88, 0x84, 0x55];
+        var frame = new byte[headerSize + padding + startCodeSize + nal.Length];
+        frame[headerSize + padding + startCodeSize - 1] = 1;
+        Array.Copy(nal, 0, frame, frame.Length - nal.Length, nal.Length);
+        var decoder = new VideoPayloadDecoder(new byte[16]);
+        decoder.Reset(0);
+        Assert.True(decoder.TryDecode(frame, VideoCodec.H264, false, out var payload, out _));
+        Assert.Equal(new byte[] { 0, 0, 0, 1, 0x65, 0x88, 0x84, 0x55 }, payload);
+        Assert.Equal(VideoDecryptMode.None, decoder.SelectedMode);
+    }
+
     [Fact]
     public void RejectsPayloadWithoutAnnexBUnits()
     {
@@ -93,7 +110,7 @@ public class VideoPayloadDecoderTests
         Assert.Equal(64, height);
     }
 
-    private static byte[] BuildHevcAccessUnit()
+    internal static byte[] BuildHevcAccessUnit()
     {
         // One real 64x64 x265 keyframe with VPS/SPS/PPS and no metadata SEI.
         return Convert.FromBase64String(

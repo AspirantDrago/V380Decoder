@@ -211,7 +211,8 @@ namespace V380Decoder.src
             streamClient = new TcpClient
             {
                 NoDelay = true,
-                ReceiveBufferSize = 0x8000
+                ReceiveBufferSize = 0x20000,
+                SendBufferSize = 0x10000
             };
             var r = streamClient.BeginConnect(ip, port, null, null);
             if (!r.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(5)))
@@ -643,8 +644,7 @@ namespace V380Decoder.src
                     return false;
                 }
 
-                for (int i = 0; i < length; i++)
-                    bytes.Add(data[i]);
+                bytes.AddRange(data.AsSpan(0, length));
 
                 next = (ushort)(fragmentIndex + 1);
                 if (fragmentIndex != fragmentTotal - 1)
@@ -708,27 +708,29 @@ namespace V380Decoder.src
 
         byte[] ReceiveData(NetworkStream s, int max)
         {
-            var buf = new byte[max]; int tot = 0;
-            var deadline = DateTime.Now.AddSeconds(5);
-            while (DateTime.Now < deadline)
+            var buf = new byte[max];
+            int tot = 0;
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline && tot < max)
             {
-                if (s.DataAvailable || tot > 0)
+                if (s.DataAvailable)
                 {
                     int n = s.Read(buf, tot, max - tot);
                     if (n <= 0) break;
                     tot += n;
-                    if (tot >= 16) break;
                 }
                 else Thread.Sleep(10);
             }
             if (tot == 0) return null;
-            var r = new byte[tot]; Array.Copy(buf, r, tot); return r;
+            var r = new byte[tot];
+            Array.Copy(buf, r, tot);
+            return r;
         }
 
         int ReadExact(NetworkStream s, byte[] buf, int off, int cnt)
         {
             int tot = 0;
-            var deadline = DateTime.Now.AddSeconds(3);
+            var deadline = DateTime.Now.AddSeconds(15);
             while (tot < cnt)
             {
                 if (DateTime.Now > deadline)

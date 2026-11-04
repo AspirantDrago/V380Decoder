@@ -31,6 +31,19 @@ Run the decryption, SDP, RTP transport, and snapshot color regression tests:
 dotnet test tests/V380Decoder.Tests/V380Decoder.Tests.csproj --configuration Release
 ```
 
+## Camera reconnection
+
+Stream-login replies can be shorter than 412 bytes. The decoder reads the
+available response and allows a 200 ms gap for TCP fragments, then sends the
+start command promptly. Fixed-size authentication replies still require all
+256 bytes. A negative stream-login result is reported as a failure.
+
+If the camera closes its media socket, the decoder closes the old session,
+obtains a fresh authentication ticket, and retries with delays of 1, 2, 4, 8,
+and up to 15 seconds. Control commands are accepted only after streaming has
+started, and packet writes are serialized with socket teardown. Idle reads
+and retry waits respond to cancellation.
+
 ## Audio compatibility
 
 Legacy `0x1A` G.711 A-law audio passes through unchanged. For `0x16` audio,

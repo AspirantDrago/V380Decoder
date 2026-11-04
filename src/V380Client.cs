@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -21,7 +22,9 @@ namespace V380Decoder.src
         private int frameWidth = 1280;
         private int frameheight = 720;
         private byte[] aesKey = new byte[16];
-        private bool needReconnect = false;
+        private volatile bool needReconnect;
+        private readonly object streamSendLock = new();
+        private bool streamReady;
         private DeviceInfo deviceInfo;
         private readonly VideoPayloadDecoder videoPayloadDecoder;
         private readonly AudioPayloadDecoder audioPayloadDecoder;
@@ -47,49 +50,45 @@ namespace V380Decoder.src
         public void Run(RtspServer rtsp, CancellationToken ct)
         {
             SetDeviceInfo();
+            RunConnectionLoop(rtsp, ct);
+        }
+
+        internal void RunConnectionLoop(RtspServer rtsp, CancellationToken ct)
+        {
+            int retryDelayMs = 1000;
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    int auth = GetAuthTicket();
-                    if (auth == 0) continue;
+                    int auth = GetAuthTicket(ct);
                     if (auth == -1) break;
-
-                    if (!StreamLogin())
+                    if (auth == 1 && StreamLogin(ct) && StartStream())
                     {
-                        Console.Error.WriteLine("[STREAM] Retrying...");
-                        streamStream?.Close(); streamClient?.Close();
-                        continue;
+                        var liveTime = Stopwatch.StartNew();
+                        ReceiveFrames(mode, rtsp, ct);
+                        if (liveTime.Elapsed >= TimeSpan.FromSeconds(30)) retryDelayMs = 1000;
                     }
-
-                    if (!StartStream())
-                    {
-                        Console.Error.WriteLine("[STREAM] Retrying...");
-                        continue;
-                    }
-
-                    ReceiveFrames(mode, rtsp, ct);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    Console.Error.WriteLine("[STREAM] Operation cancelled");
                     break;
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"[ERROR] Fatal error: {ex.Message}");
-                    Console.Error.WriteLine($"[ERROR] Stack trace: {ex.StackTrace}");
-                    Thread.Sleep(3000);
+                    Console.Error.WriteLine($"[STREAM] {ex.Message}");
                 }
                 finally
                 {
-                    Console.Error.WriteLine("[STREAM] Closing connection...");
-                    streamStream?.Close(); streamClient?.Close();
+                    CloseStreamConnection();
                 }
+                if (ct.IsCancellationRequested) break;
+                Console.Error.WriteLine($"[STREAM] Reconnecting with fresh authentication in {retryDelayMs / 1000}s");
+                if (ct.WaitHandle.WaitOne(retryDelayMs)) break;
+                retryDelayMs = Math.Min(retryDelayMs * 2, 15000);
             }
         }
 
-        public int GetAuthTicket()
+        public int GetAuthTicket(CancellationToken ct = default)
         {
             try
             {
@@ -134,7 +133,7 @@ namespace V380Decoder.src
                     return 0;
                 }
 
-                var resp = ReceiveData(authStream, 256);
+                var resp = CameraResponseReader.Read(authClient, 256, 256, ct);
                 if (resp == null || resp.Length < 256)
                 {
                     Console.Error.WriteLine("[AUTH] failed receive response. retrying...");
@@ -207,14 +206,17 @@ namespace V380Decoder.src
         }
 
 
-        public bool StreamLogin()
+        public bool StreamLogin(CancellationToken ct = default)
         {
+            CloseStreamConnection();
+            needReconnect = false;
             communicationVersion = 0;
             streamClient = new TcpClient
             {
                 NoDelay = true,
                 ReceiveBufferSize = 0x20000,
-                SendBufferSize = 0x10000
+                SendBufferSize = 0x10000,
+                SendTimeout = 3000
             };
             var r = streamClient.BeginConnect(ip, port, null, null);
             if (!r.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(5)))
@@ -222,7 +224,6 @@ namespace V380Decoder.src
                 Console.Error.WriteLine("[STREAM] failed connecting to socket. retrying...");
                 return false;
             }
-            ;
             streamClient.EndConnect(r);
             streamStream = streamClient.GetStream();
 
@@ -257,7 +258,7 @@ namespace V380Decoder.src
                 return false;
             }
 
-            var resp401 = ReceiveData(streamStream, 412);
+            var resp401 = CameraResponseReader.Read(streamClient, 412, 8, ct);
 
             if (resp401 == null || resp401.Length < 8)
             {
@@ -272,7 +273,7 @@ namespace V380Decoder.src
             }
 
             int result = (int)ReadUInt32LE(resp401, 4);
-            if (result == -11 || result == -12)
+            if (result < 0)
             {
                 Console.Error.WriteLine($"[STREAM] login failed result={result}");
                 return false;
@@ -322,7 +323,7 @@ namespace V380Decoder.src
             reportedExtendedAudio = false;
 
             if (deviceVersion > 30) GenerateMediaKey(authTicket);
-            Console.Error.WriteLine($"[STREAM] login OK communicationVersion={communicationVersion}");
+            Console.Error.WriteLine($"[STREAM] login OK communicationVersion={communicationVersion} responseBytes={resp401.Length}");
             return true;
         }
 
@@ -332,7 +333,11 @@ namespace V380Decoder.src
             var cmd303 = new byte[256];
             WriteUInt32LE(cmd303, 0, 303);
             WriteUInt16LE(cmd303, 4, 0x3001);
-            return SendData(streamStream, cmd303);
+            lock (streamSendLock)
+            {
+                streamReady = streamStream != null && SendData(streamStream, cmd303);
+                return streamReady;
+            }
         }
 
         public void ReceiveFrames(OutputMode mode, RtspServer rtsp, CancellationToken ct)
@@ -355,17 +360,10 @@ namespace V380Decoder.src
             {
                 while (!ct.IsCancellationRequested)
                 {
-                    if (needReconnect)
-                    {
-                        Console.Error.WriteLine($"[STREAM] lost, reconnecting... ");
-                        try { streamStream?.Close(); streamClient?.Close(); } catch { }
-                        if (!StreamLogin()) break;
-                        if (!StartStream()) break;
-                        needReconnect = false;
-                    }
+                    if (needReconnect) break;
 
                     // 12-byte fragment header
-                    if (ReadExact(streamStream, header12, 0, 12) < 12) continue;
+                    CameraResponseReader.ReadExactly(streamClient, header12, 0, 12, ct);
 
                     if (header12[0] != 0x7F)
                     {
@@ -384,7 +382,7 @@ namespace V380Decoder.src
                     }
 
                     if (payloadBuf.Length < payLen) payloadBuf = new byte[payLen];
-                    if (ReadExact(streamStream, payloadBuf, 0, payLen) < payLen) continue;
+                    CameraResponseReader.ReadExactly(streamClient, payloadBuf, 0, payLen, ct);
 
                     if (type == 0x5B)
                     {
@@ -714,54 +712,41 @@ namespace V380Decoder.src
             return out_;
         }
 
-        bool SendData(NetworkStream s, byte[] d)
+        bool SendData(NetworkStream stream, byte[] data)
         {
-            try { s.Write(d, 0, d.Length); s.Flush(); return true; }
-            catch (Exception ex) { Console.Error.WriteLine($"[SEND] {ex.Message}"); return false; }
+            lock (streamSendLock)
+            {
+                try
+                {
+                    stream.Write(data, 0, data.Length);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    if (ReferenceEquals(stream, streamStream))
+                    {
+                        streamReady = false;
+                        needReconnect = true;
+                        try { stream.Close(); } catch { }
+                    }
+                    string channel = ReferenceEquals(stream, authStream) ? "AUTH" : "STREAM";
+                    uint command = data.Length >= 4 ? ReadUInt32LE(data, 0) : 0;
+                    Console.Error.WriteLine($"[SEND] {channel} cmd={command}: {ex.Message}");
+                    return false;
+                }
+            }
         }
 
-        byte[] ReceiveData(NetworkStream s, int max)
+        private void CloseStreamConnection()
         {
-            var buf = new byte[max];
-            int tot = 0;
-            var deadline = DateTime.UtcNow.AddSeconds(5);
-            while (DateTime.UtcNow < deadline && tot < max)
+            lock (streamSendLock)
             {
-                if (s.DataAvailable)
-                {
-                    int n = s.Read(buf, tot, max - tot);
-                    if (n <= 0) break;
-                    tot += n;
-                }
-                else Thread.Sleep(10);
+                streamReady = false;
+                try { streamStream?.Close(); } catch { }
+                try { streamClient?.Close(); } catch { }
+                streamStream = null;
+                streamClient = null;
             }
-            if (tot == 0) return null;
-            var r = new byte[tot];
-            Array.Copy(buf, r, tot);
-            return r;
-        }
-
-        int ReadExact(NetworkStream s, byte[] buf, int off, int cnt)
-        {
-            int tot = 0;
-            var deadline = DateTime.Now.AddSeconds(15);
-            while (tot < cnt)
-            {
-                if (DateTime.Now > deadline)
-                {
-                    needReconnect = true;
-                    return tot;
-                }
-                if (!s.DataAvailable)
-                {
-                    Thread.Sleep(10);
-                    continue;
-                }
-                int n = s.Read(buf, off + tot, cnt - tot);
-                if (n <= 0) break;
-                tot += n;
-            }
-            return tot;
         }
 
         void WriteUInt32LE(byte[] b, int o, uint v) { b[o] = (byte)v; b[o + 1] = (byte)(v >> 8); b[o + 2] = (byte)(v >> 16); b[o + 3] = (byte)(v >> 24); }
@@ -785,8 +770,11 @@ namespace V380Decoder.src
         public bool ImageFlip() => SendControl(V380Commands.IMAGE_FLIP);
         private bool SendControl(byte[] payload)
         {
-            if (streamStream == null) return false;
-            return SendData(streamStream, payload);
+            lock (streamSendLock)
+            {
+                if (!streamReady || streamStream == null) return false;
+                return SendData(streamStream, payload);
+            }
         }
 
         public string GetDeviceId()
@@ -821,7 +809,7 @@ namespace V380Decoder.src
         public void Dispose()
         {
             authStream?.Close(); authClient?.Close();
-            streamStream?.Close(); streamClient?.Close();
+            CloseStreamConnection();
             snapshotManager?.Dispose();
         }
     }

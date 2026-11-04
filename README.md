@@ -165,6 +165,43 @@ selective `64/80` AES layout and version-21 full-block AES.
 
 Tested with [Onvif Device Manager](https://sourceforge.net/projects/onvifdm/) (ODM), [Onvif Integration](https://www.home-assistant.io/integrations/onvif/) Home Assistant and [Shinobi](https://shinobi.video/)
 
+The bridge provides complete read-only media profiles, HTTP Digest and
+WS-Security UsernameToken authentication when `--secure` is enabled. RTSP
+accepts Digest or Basic authentication and supports UDP unicast, TCP
+interleaving, and `GET_PARAMETER` keepalives. Unsupported operations return
+SOAP faults rather than claiming that a camera setting was changed.
+
+H.264 is exposed through Media1 and Media2. Native H.265 is exposed through
+Media2 (`/onvif/media2_service`); a recorder limited to Media1 cannot use an
+HEVC stream through this bridge without transcoding. Video codec,
+resolution, and frame rate are taken from the received stream, including
+HEVC SPS dimensions. The bridge preserves the native video codec.
+
+For Dahua or another NVR, enable `--enable-onvif` and add the **decoder
+server's IP and HTTP port** as an ONVIF device. Use the camera credentials
+configured for the bridge when `--secure` is enabled. Each camera container
+needs its own HTTP and RTSP ports; discovery identities are stable and
+unique per camera ID. Remove the old failed NVR entry before re-adding so
+it can refresh cached service and profile data.
+
+Docker host networking is recommended for multicast discovery and UDP RTP.
+With published ports or a reverse proxy, advertise externally reachable
+URLs explicitly (adjust these example addresses and ports):
+
+```text
+--onvif-url http://192.168.1.3:8081
+--rtsp-url rtsp://192.168.1.3:8555/live
+```
+
+For Docker bridge networking, use RTSP over TCP on the recorder; the bridge's
+UDP RTP ports are allocated dynamically. Advertised URL overrides do not
+publish ports or enable multicast forwarding.
+
+ONVIF errors are logged with operation name and HTTP status. Enable
+`--debug` for all ONVIF operation names. An initial Digest `401` challenge is
+normal when followed by a successful authenticated request. NVR-specific
+behavior still requires validation on the actual recorder.
+
 **Enable ONVIF:**
 ```bash
 ./V380Decoder --id 12345678 --username admin --password password --ip 192.168.1.2 --enable-onvif

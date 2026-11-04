@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Xml;
+using Microsoft.AspNetCore.Http.Features;
+using System.Xml.Linq;
 
 namespace V380Decoder.src
 {
@@ -21,6 +24,9 @@ namespace V380Decoder.src
         private readonly string username;
         private readonly string password;
         private WebApplication app;
+        private readonly DigestAuthentication onvifDigest = new();
+        private readonly string advertisedHttpUrl, advertisedRtspUrl;
+        internal int BoundPort => new Uri(app.Urls.First()).Port;
         public WebServer(
             int httpPort,
             int rtspPort,
@@ -30,7 +36,9 @@ namespace V380Decoder.src
             bool enableMjpeg,
             bool secure,
             string username,
-            string password)
+            string password,
+            string advertisedHttpUrl = null,
+            string advertisedRtspUrl = null)
         {
             this.httpPort = httpPort;
             this.rtspPort = rtspPort;
@@ -41,6 +49,8 @@ namespace V380Decoder.src
             this.secure = secure;
             this.username = username;
             this.password = password;
+            this.advertisedHttpUrl = advertisedHttpUrl;
+            this.advertisedRtspUrl = advertisedRtspUrl;
         }
 
         public void Start()
@@ -67,30 +77,14 @@ namespace V380Decoder.src
                     var http = context.HttpContext;
 
                     var auth = http.Request.Headers.Authorization.ToString();
-
-                    if (string.IsNullOrEmpty(auth) ||
-                        !auth.StartsWith("Basic "))
+                    string target = http.Features.Get<IHttpRequestFeature>()?.RawTarget;
+                    if (string.IsNullOrEmpty(target)) target = http.Request.PathBase + http.Request.Path + http.Request.QueryString;
+                    if (!DigestAuthentication.VerifyBasic(auth, username, password) &&
+                        !onvifDigest.Verify(auth, http.Request.Method, target, username, password))
                     {
                         http.Response.StatusCode = 401;
-
-                        http.Response.Headers.WWWAuthenticate =
-                            @"Basic realm=""V380 Authentication""";
-
-                        return Results.Empty;
-                    }
-
-                    var encoded = auth["Basic ".Length..].Trim();
-
-                    var credential = Encoding.UTF8.GetString(
-                        Convert.FromBase64String(encoded));
-
-                    var parts = credential.Split(':', 2);
-
-                    if (parts.Length != 2 ||
-                        parts[0] != username ||
-                        parts[1] != password)
-                    {
-                        http.Response.StatusCode = 401;
+                        http.Response.Headers.Append("WWW-Authenticate", onvifDigest.Challenge());
+                        http.Response.Headers.Append("WWW-Authenticate", @"Basic realm=""V380 Authentication""");
                         return Results.Empty;
                     }
 
@@ -188,6 +182,9 @@ namespace V380Decoder.src
                 onvifGroup.MapPost("/onvif/media_service", async (HttpContext ctx) =>
                     await HandleOnvif(ctx));
 
+                onvifGroup.MapPost("/onvif/media2_service", async (HttpContext ctx) =>
+                    await HandleOnvif(ctx));
+
                 onvifGroup.MapPost("/onvif/ptz_service", async (HttpContext ctx) =>
                     await HandleOnvif(ctx));
 
@@ -195,35 +192,66 @@ namespace V380Decoder.src
                     await HandleOnvif(ctx));
             }
 
-            Task.Run(() => app.Run());
+            app.StartAsync().GetAwaiter().GetResult();
         }
 
-        private async Task HandleOnvif(HttpContext ctx)
+        internal async Task HandleOnvif(HttpContext ctx)
         {
-            string body = "";
+            string body;
             using (var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8))
-            {
                 body = await reader.ReadToEndAsync();
+            OnvifSoap request;
+            try { request = new OnvifSoap(body); }
+            catch (XmlException)
+            {
+                ctx.Response.StatusCode = 400;
+                ctx.Response.ContentType = "application/soap+xml; charset=utf-8";
+                await ctx.Response.WriteAsync(OnvifSoap.Fault("InvalidArgVal", "Invalid SOAP request"));
+                Console.Error.WriteLine("[ONVIF] Invalid SOAP request status=400");
+                return;
             }
-
-            string soapAction = ctx.Request.Headers["SOAPAction"].ToString();
-            string contentType = ctx.Request.Headers["Content-Type"].ToString();
-            var ctMatch = Regex.Match(contentType, @"action=""([^""]+)""", RegexOptions.IgnoreCase);
-            string rawAction = soapAction != "" ? soapAction
-                             : ctMatch.Success ? ctMatch.Groups[1].Value
-                             : "";
-
-            string action = rawAction.TrimEnd('/').Split('/').Last();
-            if (action.StartsWith("wsdl", StringComparison.OrdinalIgnoreCase) && action.Length > 4)
-                action = action.Substring(4);
-
-
-            string resp = OnvifHandler.Handle(action, body, ctx, client, httpPort, rtspPort, secure, username, password);
-
-            LogUtils.debug($"[ONVIF] response: {(resp.Length > 300 ? resp[..300] + "..." : resp)}");
-
-            ctx.Response.ContentType = "application/soap+xml; charset=utf-8";
-            await ctx.Response.WriteAsync(resp);
+            if (advertisedHttpUrl != null) ctx.Items[OnvifEndpoints.HttpKey] = advertisedHttpUrl;
+            if (advertisedRtspUrl != null) ctx.Items[OnvifEndpoints.RtspKey] = advertisedRtspUrl;
+            bool transportAuthenticated = false;
+            string authorization = ctx.Request.Headers.Authorization.ToString();
+            bool anonymous = request.Action is "GetSystemDateAndTime" or "GetCapabilities" or "GetScopes";
+            if (secure && (authorization != "" || (!anonymous && request.UsernameToken == null)))
+            {
+                string target = ctx.Features.Get<IHttpRequestFeature>()?.RawTarget;
+                if (string.IsNullOrEmpty(target)) target = ctx.Request.PathBase + ctx.Request.Path + ctx.Request.QueryString;
+                transportAuthenticated = onvifDigest.Verify(authorization, ctx.Request.Method, target, username, password);
+                if (!transportAuthenticated)
+                {
+                    ctx.Response.StatusCode = 401;
+                    ctx.Response.Headers.WWWAuthenticate = onvifDigest.Challenge();
+                    Console.Error.WriteLine($"[ONVIF] {request.Action} status=401 HTTP Digest challenge");
+                    return;
+                }
+            }
+            if (client != null && !client.StreamInfo.Known &&
+                request.Action is "GetProfiles" or "GetProfile" or "GetVideoEncoderConfigurations" or "GetVideoEncoderConfiguration")
+            {
+                try { await client.VideoReady.WaitAsync(TimeSpan.FromSeconds(3), ctx.RequestAborted); }
+                catch (TimeoutException)
+                {
+                    ctx.Response.StatusCode = 503;
+                    ctx.Response.ContentType = "application/soap+xml; charset=utf-8";
+                    await ctx.Response.WriteAsync(request.FormatResponse(OnvifSoap.Fault("ActionNotSupported", "Camera video format is not available yet; retry after the camera connects")));
+                    Console.Error.WriteLine($"[ONVIF] {request.Action} status=503 camera video format not available");
+                    return;
+                }
+            }
+            string response = OnvifHandler.Handle(request.Action, body, ctx, client, httpPort, rtspPort,
+                secure, username, password, transportAuthenticated);
+            response = request.FormatResponse(response);
+            ctx.Response.ContentType = request.EnvelopeNamespace == OnvifSoap.Soap11 ? "text/xml; charset=utf-8" : "application/soap+xml; charset=utf-8";
+            if (ctx.Response.StatusCode >= 400)
+                Console.Error.WriteLine($"[ONVIF] {request.Action} status={ctx.Response.StatusCode} " +
+                    XDocument.Parse(response).Descendants().FirstOrDefault(e => e.Name.LocalName is "Text" or "faultstring")?.Value);
+            else if (request.Action is "GetServices" or "GetProfiles" or "GetStreamUri")
+                Console.Error.WriteLine($"[ONVIF] {request.Namespace}/{request.Action} status={ctx.Response.StatusCode}");
+            else LogUtils.debug($"[ONVIF] {request.Namespace}/{request.Action} status={ctx.Response.StatusCode}");
+            await ctx.Response.WriteAsync(response);
         }
 
         public void Stop()

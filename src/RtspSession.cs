@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Net;
 using System.Text;
 
 namespace V380Decoder.src
@@ -14,6 +15,10 @@ namespace V380Decoder.src
         private Thread readThread;
         private volatile bool playing;
         private volatile bool alive = true;
+        private volatile bool videoSetup, audioSetup;
+        private int closed;
+        private readonly DigestAuthentication digest = new();
+        private UdpTransport videoUdp, audioUdp;
 
         // interleaved channels negotiated in SETUP
         private byte videoCh = 0, audioCh = 2;
@@ -44,67 +49,75 @@ namespace V380Decoder.src
 
         public void Close()
         {
+            if (Interlocked.Exchange(ref closed, 1) != 0) return;
             alive = false;
             playing = false;
             try { tcp.Close(); } catch { }
+            videoUdp?.Dispose();
+            audioUdp?.Dispose();
             OnClose?.Invoke();
         }
 
-        // ── RTSP request reader ──────────────────────────────────
+        // Consume complete RTSP messages and client RTCP interleaved frames.
         void ReadLoop()
         {
-            var sb = new StringBuilder();
-            var buf = new byte[4096];
+            var pending = new List<byte>();
+            var buffer = new byte[4096];
             try
             {
                 while (alive)
                 {
-                    int n = ns.Read(buf, 0, buf.Length);
-                    if (n <= 0) break;
-                    sb.Append(Encoding.ASCII.GetString(buf, 0, n));
-                    string raw = sb.ToString();
-                    int end;
-                    while ((end = raw.IndexOf("\r\n\r\n", StringComparison.Ordinal)) >= 0)
+                    int count = ns.Read(buffer, 0, buffer.Length);
+                    if (count == 0) break;
+                    pending.AddRange(buffer.AsSpan(0, count));
+                    while (pending.Count > 0)
                     {
-                        string req = raw[..(end + 4)];
-                        raw = raw[(end + 4)..];
-                        HandleRequest(req);
+                        if (pending[0] == 0x24)
+                        {
+                            if (pending.Count < 4) break;
+                            int size = 4 + (pending[2] << 8) + pending[3];
+                            if (pending.Count < size) break;
+                            pending.RemoveRange(0, size);
+                            continue;
+                        }
+                        int end = -1;
+                        for (int i = 0; i + 3 < pending.Count; i++)
+                            if (pending[i] == 13 && pending[i + 1] == 10 && pending[i + 2] == 13 && pending[i + 3] == 10) { end = i + 4; break; }
+                        if (end < 0) { if (pending.Count > 65536) throw new IOException("RTSP header too large"); break; }
+                        string header = Encoding.ASCII.GetString(pending.GetRange(0, end).ToArray());
+                        string contentLength = header.Split("\r\n").FirstOrDefault(l => l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
+                        int bodyLength = contentLength == null ? 0 : int.Parse(contentLength.Split(':', 2)[1].Trim());
+                        if (bodyLength < 0 || bodyLength > 65536) throw new IOException("Invalid RTSP body length");
+                        if (pending.Count < end + bodyLength) break;
+                        pending.RemoveRange(0, end + bodyLength);
+                        HandleRequest(header);
                     }
-                    sb.Clear(); sb.Append(raw);
                 }
             }
             catch { }
             finally { Close(); }
         }
 
-        // ── Authentication ──────────────────────────────────
-        private bool CheckAuth(string authHeader)
+        private bool CheckAuth(string header, string method, string target)
         {
-            if (string.IsNullOrEmpty(authHeader)) return false;
+            string value = header.Split(':', 2).ElementAtOrDefault(1)?.Trim() ?? "";
+            return DigestAuthentication.VerifyBasic(value, server.Username, server.Password) ||
+                digest.Verify(value, method, target, server.Username, server.Password);
+        }
 
-            var headerParts = authHeader.Split(':', 2);
-            if (headerParts.Length != 2) return false;
-
-            string authValue = headerParts[1].Trim();
-            if (!authValue.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            try
+        private sealed class UdpTransport : IDisposable
+        {
+            public readonly UdpClient Rtp, Rtcp;
+            public readonly IPEndPoint Destination;
+            public int RtpPort => ((IPEndPoint)Rtp.Client.LocalEndPoint).Port;
+            public int RtcpPort => ((IPEndPoint)Rtcp.Client.LocalEndPoint).Port;
+            public UdpTransport(IPAddress remote, int port)
             {
-                string encoded = authValue["Basic ".Length..].Trim();
-                string credential = Encoding.ASCII.GetString(Convert.FromBase64String(encoded));
-                var parts = credential.Split(':', 2);
-
-                if (parts.Length == 2 &&
-                    parts[0] == server.Username &&
-                    parts[1] == server.Password)
-                {
-                    return true;
-                }
+                Destination = new IPEndPoint(remote, port);
+                Rtp = new UdpClient(new IPEndPoint(remote.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
+                Rtcp = new UdpClient(new IPEndPoint(remote.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
             }
-            catch { }
-
-            return false;
+            public void Dispose() { Rtp.Dispose(); Rtcp.Dispose(); }
         }
 
         void HandleRequest(string req)
@@ -122,9 +135,10 @@ namespace V380Decoder.src
             // Check authentication for methods other than OPTIONS (if secure)
             if (secure && method != "OPTIONS" && !authenticated)
             {
-                if (!CheckAuth(authHeader))
+                if (!CheckAuth(authHeader, method, url))
                 {
                     Send($"RTSP/1.0 401 Unauthorized\r\nCSeq: {cseq}\r\n" +
+                         $"WWW-Authenticate: {digest.Challenge()}\r\n" +
                          $"WWW-Authenticate: Basic realm=\"V380 Authentication\"\r\n\r\n");
                     return;
                 }
@@ -134,7 +148,7 @@ namespace V380Decoder.src
             switch (method)
             {
                 case "OPTIONS":
-                    Reply(cseq, "Public: OPTIONS,DESCRIBE,SETUP,PLAY,TEARDOWN");
+                    Reply(cseq, "Public: OPTIONS,DESCRIBE,SETUP,PLAY,GET_PARAMETER,TEARDOWN");
                     break;
 
                 case "DESCRIBE":
@@ -142,24 +156,36 @@ namespace V380Decoder.src
                         string sdp = server.BuildSdp();
                         byte[] body = Encoding.ASCII.GetBytes(sdp);
                         Send($"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n" +
-                             $"Content-Type: application/sdp\r\nContent-Length: {body.Length}\r\n\r\n{sdp}");
+                             $"Content-Type: application/sdp\r\nContent-Base: {url.TrimEnd('/')}/\r\nContent-Length: {body.Length}\r\n\r\n{sdp}");
                         break;
                     }
 
                 case "SETUP":
                     {
                         bool isAudio = url.Contains("trackID=1");
-                        // Parse interleaved channels from client Transport header
-                        // e.g. Transport: RTP/AVP/TCP;unicast;interleaved=0-1
-                        byte ch = (byte)(isAudio ? 2 : 0);
-                        var m = System.Text.RegularExpressions.Regex.Match(transport, @"interleaved=(\d+)-(\d+)");
-                        if (m.Success) ch = byte.Parse(m.Groups[1].Value);
-                        if (isAudio) audioCh = ch;
-                        else videoCh = ch;
-
-                        Reply(cseq,
-                            $"Transport: RTP/AVP/TCP;unicast;interleaved={ch}-{ch + 1}",
-                            "Session: 1");
+                        bool tcpTransport = transport.Contains("RTP/AVP/TCP", StringComparison.OrdinalIgnoreCase);
+                        if (tcpTransport)
+                        {
+                            byte ch = (byte)(isAudio ? 2 : 0);
+                            var match = System.Text.RegularExpressions.Regex.Match(transport, @"interleaved=(\d+)-(\d+)");
+                            if (match.Success && (!byte.TryParse(match.Groups[1].Value, out ch) || ch > 254))
+                            { Send($"RTSP/1.0 461 Unsupported Transport\r\nCSeq: {cseq}\r\n\r\n"); break; }
+                            if (isAudio) { audioUdp?.Dispose(); audioUdp = null; audioCh = ch; audioSetup = true; }
+                            else { videoUdp?.Dispose(); videoUdp = null; videoCh = ch; videoSetup = true; }
+                            Reply(cseq, $"Transport: RTP/AVP/TCP;unicast;interleaved={ch}-{ch + 1}", "Session: 1");
+                        }
+                        else
+                        {
+                            var match = System.Text.RegularExpressions.Regex.Match(transport, @"client_port=(\d+)-(\d+)");
+                            if (!transport.Contains("RTP/AVP", StringComparison.OrdinalIgnoreCase) || transport.Contains("multicast", StringComparison.OrdinalIgnoreCase) ||
+                                !match.Success || !int.TryParse(match.Groups[1].Value, out int port) || port is < 1 or > 65535 ||
+                                !int.TryParse(match.Groups[2].Value, out int rtcpPort) || rtcpPort is < 1 or > 65535)
+                            { Send($"RTSP/1.0 461 Unsupported Transport\r\nCSeq: {cseq}\r\n\r\n"); break; }
+                            var udp = new UdpTransport(((IPEndPoint)tcp.Client.RemoteEndPoint).Address, port);
+                            if (isAudio) { audioUdp?.Dispose(); audioUdp = udp; audioSetup = true; }
+                            else { videoUdp?.Dispose(); videoUdp = udp; videoSetup = true; }
+                            Reply(cseq, $"Transport: RTP/AVP;unicast;client_port={port}-{rtcpPort};server_port={udp.RtpPort}-{udp.RtcpPort}", "Session: 1");
+                        }
                         break;
                     }
 
@@ -169,6 +195,10 @@ namespace V380Decoder.src
                         $"RTP-Info: url={url}/trackID=0;seq={videoSeq},url={url}/trackID=1;seq={audioSeq}");
                     playing = true;
                     Console.Error.WriteLine($"[RTSP#{id}] playing");
+                    break;
+
+                case "GET_PARAMETER":
+                    Reply(cseq, "Session: 1");
                     break;
 
                 case "TEARDOWN":
@@ -204,7 +234,7 @@ namespace V380Decoder.src
         // ── RTP video push (Annex-B H.264/H.265 → RTP) ──────────
         public void PushVideo(FrameData f)
         {
-            if (!playing) return;
+            if (!playing || !videoSetup) return;
 
             // Advance once per access unit; use the advertised rate, or 12 fps.
             uint tick = f.FrameRate is > 0 and <= 120 ? 90000u / f.FrameRate : 7500u;
@@ -311,7 +341,7 @@ namespace V380Decoder.src
         // ── RTP audio push  (PCMA raw samples) ──────────────────
         public void PushAudio(FrameData f)
         {
-            if (!playing) return;
+            if (!playing || !audioSetup) return;
 
             // Use synthetic RTP timestamps to prevent DTS discontinuities
             // 160 samples per chunk at 8 kHz = 20 ms of audio per RTP packet
@@ -353,9 +383,11 @@ namespace V380Decoder.src
 
             try
             {
-                lock (ns) { ns.Write(frame, 0, frame.Length); }
+                var udp = pt == 8 ? audioUdp : videoUdp;
+                if (udp != null) udp.Rtp.Send(frame.AsSpan(4), udp.Destination);
+                else lock (ns) { ns.Write(frame, 0, frame.Length); }
             }
-            catch { alive = false; }
+            catch { Close(); }
         }
     }
 }

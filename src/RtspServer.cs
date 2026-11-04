@@ -58,8 +58,8 @@ namespace V380Decoder.src
                     int id = Interlocked.Increment(ref nextId);
                     var s = new RtspSession(id, tcp, this, secure);
                     sessions[id] = s;
-                    s.Start();
                     s.OnClose += () => sessions.TryRemove(id, out _);
+                    s.Start();
                 }
                 catch { }
             }
@@ -174,7 +174,7 @@ namespace V380Decoder.src
                 "o=- 1 1 IN IP4 0.0.0.0\r\n" +
                 "s=V380 Live\r\n" +
                 "t=0 0\r\n" +
-                "a=recvonly\r\n" +
+                "a=recvonly\r\na=control:*\r\n" +
                 videoDescription +
                 "a=control:trackID=0\r\n" +
                 "m=audio 0 RTP/AVP 8\r\n" +

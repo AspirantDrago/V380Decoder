@@ -29,6 +29,26 @@ namespace V380Decoder.src
         private readonly VideoPayloadDecoder videoPayloadDecoder;
         private readonly AudioPayloadDecoder audioPayloadDecoder;
         private bool reportedExtendedAudio;
+        private VideoStreamInfo streamInfo = new(VideoCodec.H264, 1280, 720, 12, false);
+        private readonly TaskCompletionSource videoReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal VideoStreamInfo StreamInfo => Volatile.Read(ref streamInfo);
+        internal Task VideoReady => videoReady.Task;
+
+        internal void UpdateVideoInfo(byte[] payload, VideoCodec codec, int rate, bool keyframe)
+        {
+            var previous = StreamInfo;
+            if (codec == VideoCodec.H265 && (keyframe || !previous.Known))
+                AnnexB.Parse(payload, codec, (type, nal) =>
+                {
+                    if (type == 33 && HevcSpsParser.TryGetDimensions(nal, out int width, out int height))
+                    { frameWidth = width; frameheight = height; }
+                });
+            int fps = rate is > 0 and <= 120 ? rate : 12;
+            var next = new VideoStreamInfo(codec, frameWidth, frameheight, fps);
+            if (next != previous) Volatile.Write(ref streamInfo, next);
+            videoReady.TrySetResult();
+        }
+
 
 
         public V380Client(string ip, int port, uint deviceId, string username, string password, SourceStream source, OutputMode mode, bool enableMjpeg)
@@ -453,6 +473,7 @@ namespace V380Decoder.src
             ulong timestamp = ReadUInt64LE(full, 8);
             bool isKeyframe = rawType is 0x00 or 0x28;
 
+            UpdateVideoInfo(payload, codec, frameRate, isKeyframe);
             snapshotManager.UpdateFrame(
                 payload, frameWidth, frameheight, isKeyframe, codec);
 

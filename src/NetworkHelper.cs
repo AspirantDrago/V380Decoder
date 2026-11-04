@@ -7,6 +7,17 @@ namespace V380Decoder.src
 {
     public class NetworkHelper
     {
+        public static string GetLocalIPAddressFor(IPAddress destination)
+        {
+            try
+            {
+                using var socket = new Socket(destination.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+                socket.Connect(new IPEndPoint(destination, 3702));
+                return ((IPEndPoint)socket.LocalEndPoint).Address.ToString();
+            }
+            catch { return GetLocalIPAddress(); }
+        }
+
         public static string GetLocalIPAddress()
         {
             try

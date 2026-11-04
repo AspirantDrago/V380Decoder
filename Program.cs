@@ -33,6 +33,8 @@ if (args.Length > 0)
     int httpPort = ArgParser.GetArg(args, "--http-port", 8080);
     bool secure = ArgParser.GetArg(args, "--secure", false);
     bool debug = ArgParser.GetArg(args, "--debug", false);
+    string onvifUrl = OnvifEndpoints.Validate(ArgParser.GetArg(args, "--onvif-url", ""), "http", "https");
+    string advertisedRtspUrl = OnvifEndpoints.Validate(ArgParser.GetArg(args, "--rtsp-url", ""), "rtsp");
 
     if (source.Equals("lan", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(ip))
     {
@@ -112,14 +114,16 @@ if (args.Length > 0)
             enableMjpeg,
             secure,
             username,
-            password);
+            password,
+            onvifUrl,
+            advertisedRtspUrl);
         webServer.Start();
     }
 
     OnvifDiscovery onvifDiscovery = null;
-    if (enableOnvif)
+    if (enableOnvif && outputMode == OutputMode.Rtsp)
     {
-        onvifDiscovery = new(httpPort);
+        onvifDiscovery = new(httpPort, client.GetDeviceId(), onvifUrl);
         onvifDiscovery.Start();
     }
 
@@ -209,6 +213,9 @@ SERVER OPTIONS:
   --enable-onvif         Enable ONVIF server (experimental) (default: false)
                          Works only with --output rtsp
                          Tested with Onvif Device Manager (ODM)
+
+  --onvif-url <url>      Public HTTP base URL advertised by ONVIF, e.g. http://192.168.1.3:8080
+  --rtsp-url <url>       Public RTSP URI when published ports differ, e.g. rtsp://192.168.1.3:8554/live
 
   --enable-mjpeg         Enable MJPEG stream for access through browser.
 

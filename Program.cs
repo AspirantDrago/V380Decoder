@@ -33,6 +33,7 @@ if (args.Length > 0)
     int httpPort = ArgParser.GetArg(args, "--http-port", 8080);
     bool secure = ArgParser.GetArg(args, "--secure", false);
     bool debug = ArgParser.GetArg(args, "--debug", false);
+    string cameraName = CameraName.Validate(ArgParser.GetArg(args, "--camera-name", "V380"));
     string onvifUrl = OnvifEndpoints.Validate(ArgParser.GetArg(args, "--onvif-url", ""), "http", "https");
     string advertisedRtspUrl = OnvifEndpoints.Validate(ArgParser.GetArg(args, "--rtsp-url", ""), "rtsp");
 
@@ -102,7 +103,8 @@ if (args.Length > 0)
             rtspPort,
             secure,
             username,
-            password);
+            password,
+            cameraName);
         rtsp.Start();
 
         webServer = new(
@@ -116,14 +118,15 @@ if (args.Length > 0)
             username,
             password,
             onvifUrl,
-            advertisedRtspUrl);
+            advertisedRtspUrl,
+            cameraName);
         webServer.Start();
     }
 
     OnvifDiscovery onvifDiscovery = null;
     if (enableOnvif && outputMode == OutputMode.Rtsp)
     {
-        onvifDiscovery = new(httpPort, client.GetDeviceId(), onvifUrl);
+        onvifDiscovery = new(httpPort, client.GetDeviceId(), onvifUrl, cameraName);
         onvifDiscovery.Start();
     }
 
@@ -204,6 +207,7 @@ OUTPUT OPTIONS:
                          Example: --rtsp-port 8554
 
 SERVER OPTIONS:
+  --camera-name <text>   Camera name for ONVIF and RTSP (default: V380)
   --enable-api           Enable web API server (default: false)
                          Provides REST API and web UI for camera control
   

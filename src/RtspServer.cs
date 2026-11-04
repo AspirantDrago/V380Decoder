@@ -10,6 +10,7 @@ namespace V380Decoder.src
         private readonly bool secure;
         private readonly string username;
         private readonly string password;
+        private readonly string cameraName;
         private TcpListener listener;
         private Thread acceptThread;
         private volatile bool running;
@@ -30,12 +31,13 @@ namespace V380Decoder.src
         private VideoStreamInfo videoInfo = new(VideoCodec.H264, 1280, 720, 12, false);
         internal int BoundPort => ((IPEndPoint)listener.LocalEndpoint).Port;
 
-        public RtspServer(int port, bool secure, string username, string password)
+        public RtspServer(int port, bool secure, string username, string password, string cameraName = null)
         {
             this.port = port;
             this.username = username;
             this.password = password;
             this.secure = secure;
+            this.cameraName = CameraName.Validate(cameraName);
         }
 
         public bool IsSecure => secure;
@@ -156,7 +158,7 @@ namespace V380Decoder.src
                 if (compatibility == null || compatibility.Completion.IsCompleted)
                 {
                     StopCompatibility();
-                    compatibilitySdp = new RtspServer(0, false, "", "");
+                    compatibilitySdp = new RtspServer(0, false, "", "", cameraName);
                     var cache = compatibilitySdp;
                     compatibility = new H264CompatibilityStream(info, frame =>
                     {
@@ -246,7 +248,7 @@ namespace V380Decoder.src
             return
                 "v=0\r\n" +
                 "o=- 1 1 IN IP4 0.0.0.0\r\n" +
-                "s=V380 Live\r\n" +
+                $"s={cameraName}\r\n" +
                 "t=0 0\r\n" +
                 "a=recvonly\r\na=control:*\r\n" +
                 videoDescription +

@@ -11,16 +11,18 @@ public class OnvifDiscovery : IDisposable
     private readonly int port;
     private readonly string advertisedUrl;
     private readonly string endpointId;
+    private readonly string cameraName;
     private readonly long instanceId = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private long messageNumber;
     private UdpClient udp;
     private Thread acceptThread;
     private volatile bool running;
 
-    public OnvifDiscovery(int port, string deviceIdentity = null, string advertisedUrl = null)
+    public OnvifDiscovery(int port, string deviceIdentity = null, string advertisedUrl = null, string cameraName = null)
     {
         this.port = port;
         this.advertisedUrl = advertisedUrl;
+        this.cameraName = CameraName.Validate(cameraName);
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes("V380Decoder:" + (deviceIdentity ?? port.ToString())));
         endpointId = "urn:uuid:" + new Guid(hash.AsSpan(0, 16));
     }
@@ -75,7 +77,7 @@ public class OnvifDiscovery : IDisposable
             new XElement(soap + "Body", new XElement(discovery + "ProbeMatches", new XElement(discovery + "ProbeMatch",
                 new XElement(addressing + "EndpointReference", new XElement(addressing + "Address", endpointId)),
                 new XElement(discovery + "Types", "dn:NetworkVideoTransmitter"),
-                new XElement(discovery + "Scopes", "onvif://www.onvif.org/type/video_encoder onvif://www.onvif.org/Profile/Streaming"),
+                new XElement(discovery + "Scopes", "onvif://www.onvif.org/type/video_encoder onvif://www.onvif.org/Profile/Streaming " + CameraName.NameScope(cameraName)),
                 new XElement(discovery + "XAddrs", baseUrl + "/onvif/device_service"), new XElement(discovery + "MetadataVersion", 1)))))).ToString();
     }
 

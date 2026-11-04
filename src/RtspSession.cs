@@ -170,7 +170,7 @@ namespace V380Decoder.src
                             Send($"RTSP/1.0 503 Service Unavailable\r\nCSeq: {cseq}\r\nRetry-After: 3\r\n\r\n");
                             break;
                         }
-                        byte[] body = Encoding.ASCII.GetBytes(sdp);
+                        byte[] body = Encoding.UTF8.GetBytes(sdp);
                         Send($"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n" +
                              $"Content-Type: application/sdp\r\nContent-Base: {url.TrimEnd('/')}/\r\nContent-Length: {body.Length}\r\n\r\n{sdp}");
                         break;
@@ -247,7 +247,7 @@ namespace V380Decoder.src
         {
             try
             {
-                byte[] b = Encoding.ASCII.GetBytes(s);
+                byte[] b = Encoding.UTF8.GetBytes(s);
                 lock (ns) { ns.Write(b, 0, b.Length); ns.Flush(); }
             }
             catch { alive = false; }

@@ -97,6 +97,7 @@ camera format, so logs from additional models are welcome.
 | `--enable-mjpeg` | `false` | No | Enable Mjpeg stream |
 | `--rtsp-port` | `8554` | No | RTSP server port |
 | `--http-port` | `8080` | No | Web server port (for ONVIF/API) |
+| `--camera-name` | `V380` | No | Camera name advertised through ONVIF and RTSP |
 | `--secure` | `false` | No | Enable authentication for ONVIF, RTSP and API. Uses the same username and password as the V380 camera |
 | `--debug` | `false` | No | Enable debug logging |
 | `--discover` | `false` | No | Discover camera |
@@ -193,6 +194,10 @@ received video, including HEVC SPS dimensions.
 clock and time-zone metadata; they never change the host or camera clock.
 Manual time advances from the requested UTC time, and NTP mode follows
 the host UTC clock. These settings reset when the bridge restarts.
+
+Set the camera name in the container arguments with `--camera-name "Вход"`.
+The default is `V380`. The value is used in ONVIF discovery, media profile
+names, and the RTSP session name. Each container can have its own value.
 
 For Dahua or another NVR, enable `--enable-onvif` and add the **decoder
 server's IP and HTTP port** as an ONVIF device. Use the camera credentials

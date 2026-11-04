@@ -27,6 +27,7 @@ namespace V380Decoder.src
         private readonly DigestAuthentication onvifDigest = new();
         private readonly OnvifClock onvifClock = new();
         private readonly string advertisedHttpUrl, advertisedRtspUrl;
+        private readonly string cameraName;
         internal int BoundPort => new Uri(app.Urls.First()).Port;
         public WebServer(
             int httpPort,
@@ -39,7 +40,8 @@ namespace V380Decoder.src
             string username,
             string password,
             string advertisedHttpUrl = null,
-            string advertisedRtspUrl = null)
+            string advertisedRtspUrl = null,
+            string cameraName = null)
         {
             this.httpPort = httpPort;
             this.rtspPort = rtspPort;
@@ -52,6 +54,7 @@ namespace V380Decoder.src
             this.password = password;
             this.advertisedHttpUrl = advertisedHttpUrl;
             this.advertisedRtspUrl = advertisedRtspUrl;
+            this.cameraName = CameraName.Validate(cameraName);
         }
 
         public void Start()
@@ -212,6 +215,7 @@ namespace V380Decoder.src
                 return;
             }
             ctx.Items[OnvifClock.ContextKey] = onvifClock;
+            if (cameraName != null) ctx.Items[CameraName.ContextKey] = cameraName;
             if (advertisedHttpUrl != null) ctx.Items[OnvifEndpoints.HttpKey] = advertisedHttpUrl;
             if (advertisedRtspUrl != null) ctx.Items[OnvifEndpoints.RtspKey] = advertisedRtspUrl;
             bool transportAuthenticated = false;

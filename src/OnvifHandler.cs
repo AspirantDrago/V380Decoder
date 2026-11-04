@@ -40,7 +40,7 @@ namespace V380Decoder.src
       }
       else if (Contains(action, body, "GetDeviceInformation")) return RespGetDeviceInformation(camera);
       else if (Contains(action, body, "GetServices")) return OnvifServices.GetServices(ctx, request.Parameter("IncludeCapability") == "true");
-      else if (Contains(action, body, "GetScopes")) return RespGetScopes();
+      else if (Contains(action, body, "GetScopes")) return RespGetScopes(CameraName.From(ctx, "V380"));
       else if (Contains(action, body, "GetNetworkInterfaces")) return RespGetNetworkInterfaces(camera);
       else if (Contains(action, body, "GetDNS")) return RespGetDNS();
       else if (Contains(action, body, "GetNTP")) return RespGetNTP();
@@ -136,7 +136,7 @@ namespace V380Decoder.src
                 <tds:HardwareId>{camera.GetDeviceVersion()}</tds:HardwareId>
               </tds:GetDeviceInformationResponse>");
 
-    private static string RespGetScopes() => Envelope(@"
+    private static string RespGetScopes(string name) => Envelope($@"
               <tds:GetScopesResponse>
                 <tds:Scopes>
                   <tt:ScopeDef>Fixed</tt:ScopeDef>
@@ -152,7 +152,7 @@ namespace V380Decoder.src
                 </tds:Scopes>
                 <tds:Scopes>
                   <tt:ScopeDef>Configurable</tt:ScopeDef>
-                  <tt:ScopeItem>onvif://www.onvif.org/name/V380</tt:ScopeItem>
+                  <tt:ScopeItem>{CameraName.NameScope(name)}</tt:ScopeItem>
                 </tds:Scopes>
                 <tds:Scopes>
                   <tt:ScopeDef>Configurable</tt:ScopeDef>

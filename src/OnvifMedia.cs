@@ -31,11 +31,11 @@ internal static class OnvifMedia
         ? Entity(name, "AudioEnc_1", "PCMA", E("Encoding", "PCMA"), E("Bitrate", 64), E("SampleRate", 8))
         : Entity(name, "AudioEnc_1", "PCMA", E("Encoding", "G711"), E("Bitrate", 64), E("SampleRate", 8), Multicast(), E("SessionTimeout", "PT60S"));
 
-    private static XElement Profile(XName name, VideoStreamInfo info, bool media2, HashSet<string> types)
+    private static XElement Profile(XName name, VideoStreamInfo info, bool media2, HashSet<string> types, string cameraName)
     {
         var result = new XElement(name, new XAttribute("token", "Profile_1"), new XAttribute("fixed", true));
         XNamespace ns = media2 ? OnvifSoap.Media2 : OnvifSoap.Schema;
-        result.Add(new XElement(media2 ? ns + "Name" : T + "Name", "V380 Live"));
+        result.Add(new XElement(media2 ? ns + "Name" : T + "Name", cameraName));
         bool Has(string type) => !media2 || types.Count == 0 || types.Contains("All") || types.Contains(type);
         var configs = new List<XElement>();
         if (Has("VideoSource")) configs.Add(VideoSource(ns + (media2 ? "VideoSource" : "VideoSourceConfiguration"), info));
@@ -91,7 +91,7 @@ internal static class OnvifMedia
             case "GetProfiles":
             case "GetProfile":
                 var types = request.Operation.Elements(ns + "Type").Select(e => e.Value).ToHashSet();
-                return Reply(Profile(ns + (action == "GetProfiles" ? "Profiles" : "Profile"), info, media2, types));
+                return Reply(Profile(ns + (action == "GetProfiles" ? "Profiles" : "Profile"), info, media2, types, CameraName.From(ctx, "V380")));
             case "GetStreamUri":
                 string protocol = request.Operation.Descendants().FirstOrDefault(e => e.Name.LocalName == "Protocol")?.Value;
                 string streamType = request.Operation.Descendants().FirstOrDefault(e => e.Name.LocalName == "Stream")?.Value;

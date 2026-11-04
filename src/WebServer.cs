@@ -25,6 +25,7 @@ namespace V380Decoder.src
         private readonly string password;
         private WebApplication app;
         private readonly DigestAuthentication onvifDigest = new();
+        private readonly OnvifClock onvifClock = new();
         private readonly string advertisedHttpUrl, advertisedRtspUrl;
         internal int BoundPort => new Uri(app.Urls.First()).Port;
         public WebServer(
@@ -210,6 +211,7 @@ namespace V380Decoder.src
                 Console.Error.WriteLine("[ONVIF] Invalid SOAP request status=400");
                 return;
             }
+            ctx.Items[OnvifClock.ContextKey] = onvifClock;
             if (advertisedHttpUrl != null) ctx.Items[OnvifEndpoints.HttpKey] = advertisedHttpUrl;
             if (advertisedRtspUrl != null) ctx.Items[OnvifEndpoints.RtspKey] = advertisedRtspUrl;
             bool transportAuthenticated = false;

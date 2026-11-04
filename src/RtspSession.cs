@@ -19,6 +19,7 @@ namespace V380Decoder.src
         private int closed;
         private readonly DigestAuthentication digest = new();
         private UdpTransport videoUdp, audioUdp;
+        internal bool CompatibilityVideo { get; private set; }
 
         // interleaved channels negotiated in SETUP
         private byte videoCh = 0, audioCh = 2;
@@ -131,6 +132,14 @@ namespace V380Decoder.src
                                   ?.Split(':', 2)[1].Trim() ?? "0";
             string transport = lines.FirstOrDefault(l => l.StartsWith("Transport:", StringComparison.OrdinalIgnoreCase)) ?? "";
             string authHeader = lines.FirstOrDefault(l => l.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase)) ?? "";
+            if (method is "DESCRIBE" or "SETUP")
+            {
+                bool compatible = Uri.TryCreate(url, UriKind.Absolute, out var target) &&
+                    target.AbsolutePath.Split('/').Contains("h264");
+                if ((videoSetup || audioSetup) && CompatibilityVideo != compatible)
+                { Send($"RTSP/1.0 459 Aggregate Operation Not Allowed\r\nCSeq: {cseq}\r\n\r\n"); return; }
+                CompatibilityVideo = compatible;
+            }
 
             // Check authentication for methods other than OPTIONS (if secure)
             if (secure && method != "OPTIONS" && !authenticated)
@@ -153,7 +162,14 @@ namespace V380Decoder.src
 
                 case "DESCRIBE":
                     {
-                        string sdp = server.BuildSdp();
+                        string sdp;
+                        try { sdp = server.Describe(CompatibilityVideo); }
+                        catch (Exception ex) when (ex is IOException or TimeoutException or System.ComponentModel.Win32Exception)
+                        {
+                            Console.Error.WriteLine($"[RTSP#{id}] H.264 compatibility stream unavailable: {ex.Message}");
+                            Send($"RTSP/1.0 503 Service Unavailable\r\nCSeq: {cseq}\r\nRetry-After: 3\r\n\r\n");
+                            break;
+                        }
                         byte[] body = Encoding.ASCII.GetBytes(sdp);
                         Send($"RTSP/1.0 200 OK\r\nCSeq: {cseq}\r\n" +
                              $"Content-Type: application/sdp\r\nContent-Base: {url.TrimEnd('/')}/\r\nContent-Length: {body.Length}\r\n\r\n{sdp}");
@@ -190,6 +206,12 @@ namespace V380Decoder.src
                     }
 
                 case "PLAY":
+                    if (CompatibilityVideo)
+                    {
+                        try { server.Describe(true); }
+                        catch (Exception ex) when (ex is IOException or TimeoutException or System.ComponentModel.Win32Exception)
+                        { Send($"RTSP/1.0 503 Service Unavailable\r\nCSeq: {cseq}\r\nRetry-After: 3\r\n\r\n"); break; }
+                    }
                     Reply(cseq,
                         "Session: 1",
                         $"RTP-Info: url={url}/trackID=0;seq={videoSeq},url={url}/trackID=1;seq={audioSeq}");

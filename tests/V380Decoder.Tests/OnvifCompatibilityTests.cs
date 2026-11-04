@@ -26,10 +26,10 @@ public class OnvifCompatibilityTests
         return $"Digest username=\"{username}\", realm=\"{realm}\", nonce=\"{nonce}\", uri=\"{target}\", algorithm=MD5, qop=auth, nc=00000001, cnonce=\"clientnonce\", response=\"{response}\"";
     }
 
-    private static XElement Token(string username, string password, bool invalid = false)
+    private static XElement Token(string username, string password, bool invalid = false, DateTimeOffset? now = null)
     {
         XNamespace ws = OnvifSoap.Wsse, util = OnvifSoap.Wsu;
-        string created = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        string created = (now ?? DateTimeOffset.UtcNow).ToString("yyyy-MM-ddTHH:mm:ssZ");
         byte[] nonce = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray();
         string digest = Convert.ToBase64String(SHA1.HashData([..nonce, ..Encoding.UTF8.GetBytes(created), ..Encoding.UTF8.GetBytes(password)]));
         return new XElement(ws + "Security",
@@ -113,7 +113,7 @@ public class OnvifCompatibilityTests
     }
 
     [Fact]
-    public void Media2ReportsHevcAndRealResolutionWithoutInventingLegacyH264()
+    public void Media2PreservesHevcAndMedia1DescribesTheActualH264CompatibilityStream()
     {
         var info = new VideoStreamInfo(VideoCodec.H265, 1920, 3240, 12);
         var doc = Media("GetProfiles", OnvifSoap.Media2, Context(), info);
@@ -123,8 +123,17 @@ public class OnvifCompatibilityTests
         Assert.Equal("3240", encoder.Element(T + "Resolution").Element(T + "Height").Value);
         Assert.Equal(new[] { "Name", "UseCount", "Encoding", "Resolution", "RateControl", "Quality" }, encoder.Elements().Select(e => e.Name.LocalName));
         Assert.Equal("PCMA", doc.Descendants(ns + "AudioEncoder").Single().Element(T + "Encoding").Value);
-        Assert.Empty(Media("GetProfiles", OnvifSoap.Media1, Context(), info).Descendants((XNamespace)OnvifSoap.Media1 + "Profiles"));
-        Assert.Contains("Media2", Media("GetProfiles", OnvifSoap.Media1, Context(), info).ToString());
+        var legacy = Media("GetProfiles", OnvifSoap.Media1, Context(), info).Descendants(T + "VideoEncoderConfiguration").Single();
+        Assert.Equal("H264", legacy.Element(T + "Encoding").Value);
+        Assert.Equal("Baseline", legacy.Element(T + "H264").Element(T + "H264Profile").Value);
+        Assert.Equal("640", legacy.Element(T + "Resolution").Element(T + "Width").Value);
+        Assert.Equal("1080", legacy.Element(T + "Resolution").Element(T + "Height").Value);
+        Assert.Equal("VideoEnc_H264", (string)legacy.Attribute("token"));
+        var selected = Media("GetProfile", OnvifSoap.Media1, Context(), info, new XElement((XNamespace)OnvifSoap.Media1 + "ProfileToken", "Profile_H264"));
+        Assert.Equal("Profile_H264", (string)selected.Descendants((XNamespace)OnvifSoap.Media1 + "Profile").Single().Attribute("token"));
+        Assert.Contains("NoProfile", Media("GetStreamUri", OnvifSoap.Media2, Context(), info, new XElement(ns + "ProfileToken", "Profile_H264")).ToString());
+        Assert.Equal("rtsp://192.0.2.10:8554/live/h264", Media("GetStreamUri", OnvifSoap.Media1, Context(), info).Descendants(T + "Uri").Single().Value);
+        Assert.Equal("rtsp://192.0.2.10:8554/live", Media("GetStreamUri", OnvifSoap.Media2, Context(), info).Descendants(ns + "Uri").Single().Value);
     }
 
     [Fact]
@@ -145,6 +154,60 @@ public class OnvifCompatibilityTests
         object fields = ns == OnvifSoap.Media2 ? new XElement((XNamespace)ns + "Protocol", "RtspMulticast") :
             new XElement((XNamespace)ns + "StreamSetup", new XElement(T + "Stream", "RTP-Multicast"));
         Assert.Contains("ActionNotSupported", Media("GetStreamUri", ns, Context(), new VideoStreamInfo(VideoCodec.H264, 1280, 720, 12), fields).ToString());
+    }
+
+    [Theory]
+    [InlineData("RTSP")]
+    [InlineData("RtspUnicast")]
+    public void Media2AcceptsTcpAndUdpUnicastRequests(string protocol)
+    {
+        XNamespace ns = OnvifSoap.Media2;
+        var doc = Media("GetStreamUri", ns.NamespaceName, Context(), new VideoStreamInfo(VideoCodec.H265, 1920, 1080, 12), new XElement(ns + "Protocol", protocol));
+        Assert.Equal("rtsp://192.0.2.10:8554/live", doc.Descendants(ns + "Uri").Single().Value);
+    }
+
+    [Fact]
+    public void SingularPtzNodeMatchesTheAdvertisedNodeAndRejectsInvalidToken()
+    {
+        const string ns = "http://www.onvif.org/ver20/ptz/wsdl";
+        var all = XDocument.Parse(OnvifHandler.Handle("", Soap("GetNodes", ns), Context(), null, 8081, 8554));
+        var ctx = Context();
+        var one = XDocument.Parse(OnvifHandler.Handle("", Soap("GetNode", ns, new XElement((XNamespace)ns + "NodeToken", "PTZNode_1")), ctx, null, 8081, 8554));
+        Assert.Equal(200, ctx.Response.StatusCode);
+        Assert.True(XNode.DeepEquals(all.Descendants((XNamespace)ns + "PTZNode").Single(), one.Descendants((XNamespace)ns + "PTZNode").Single()));
+        Assert.Contains("NoEntity", OnvifHandler.Handle("", Soap("GetNode", ns, new XElement((XNamespace)ns + "NodeToken", "bad")), ctx, null, 8081, 8554));
+        Assert.Equal(400, ctx.Response.StatusCode);
+    }
+
+    [Fact]
+    public void RecorderCanSynchronizeOnlyItsBridgeClock()
+    {
+        XNamespace ns = "http://www.onvif.org/ver10/device/wsdl";
+        var ctx = Context();
+        var clock = new OnvifClock();
+        ctx.Items[OnvifClock.ContextKey] = clock;
+        var utc = new XElement(ns + "UTCDateTime", new XElement(T + "Date", new XElement(T + "Year", 2024), new XElement(T + "Month", 2), new XElement(T + "Day", 29)),
+            new XElement(T + "Time", new XElement(T + "Hour", 12), new XElement(T + "Minute", 30), new XElement(T + "Second", 0)));
+        string Set(string mode, string dst = "false", XElement time = null) => OnvifHandler.Handle("", Soap("SetSystemDateAndTime", ns.NamespaceName,
+            new object[] { new XElement(ns + "DateTimeType", mode), new XElement(ns + "DaylightSavings", dst), time }), ctx, null, 8081, 8554);
+        var before = DateTimeOffset.UtcNow;
+        Assert.Contains("SetSystemDateAndTimeResponse", Set("Manual", time: utc));
+        Assert.Equal(200, ctx.Response.StatusCode);
+        var doc = XDocument.Parse(OnvifHandler.Handle("", Soap("GetSystemDateAndTime", ns.NamespaceName), ctx, null, 8081, 8554));
+        Assert.Equal("Manual", doc.Descendants(T + "DateTimeType").Single().Value);
+        Assert.Equal("2024", doc.Descendants(T + "Year").Single().Value);
+        string authenticated = OnvifHandler.Handle("", Soap("GetProfiles", OnvifSoap.Media1, header: Token("admin", "test", now: clock.UtcNow)),
+            ctx, null, 8081, 8554, true, "admin", "test");
+        Assert.Contains("GetProfilesResponse", authenticated);
+        Assert.Equal(200, ctx.Response.StatusCode);
+        Assert.InRange(DateTimeOffset.UtcNow - before, TimeSpan.Zero, TimeSpan.FromSeconds(5));
+        Assert.InRange((new OnvifClock().UtcNow - DateTimeOffset.UtcNow).Duration(), TimeSpan.Zero, TimeSpan.FromSeconds(1));
+        Assert.Contains("InvalidDateTime", Set("Manual"));
+        Assert.Equal(400, ctx.Response.StatusCode);
+        Assert.Equal(2024, clock.UtcNow.Year);
+        ctx.Response.StatusCode = 200;
+        Assert.Contains("SetSystemDateAndTimeResponse", Set("NTP"));
+        Assert.InRange((clock.UtcNow - DateTimeOffset.UtcNow).Duration(), TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
 
     [Fact]

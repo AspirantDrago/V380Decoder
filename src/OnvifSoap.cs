@@ -38,7 +38,7 @@ internal sealed class OnvifSoap
 
     public string Parameter(string name) => Operation.Elements().FirstOrDefault(e => e.Name.LocalName == name)?.Value;
 
-    public string ValidateUsernameToken(string username, string password)
+    public string ValidateUsernameToken(string username, string password, DateTimeOffset? utcNow = null)
     {
         XNamespace ws = Wsse, util = Wsu;
         var token = UsernameToken;
@@ -53,7 +53,7 @@ internal sealed class OnvifSoap
             string nonce = (string)token.Element(ws + "Nonce");
             if (created == null || nonce == null) return "Missing Nonce or Created";
             if (!DateTimeOffset.TryParse(created, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var time) ||
-                (DateTimeOffset.UtcNow - time).Duration() > TimeSpan.FromMinutes(5)) return "UsernameToken time outside allowed window";
+                ((utcNow ?? DateTimeOffset.UtcNow) - time).Duration() > TimeSpan.FromMinutes(5)) return "UsernameToken time outside allowed window";
             try
             {
                 byte[] bytes = [..Convert.FromBase64String(nonce), ..Encoding.UTF8.GetBytes(created), ..Encoding.UTF8.GetBytes(password)];

@@ -23,6 +23,12 @@ namespace V380Decoder.src
         private VideoCodec cachedCodec = VideoCodec.H264;
         private bool codecKnown;
         private readonly object sdpLock = new();
+        private readonly object compatibilityLock = new();
+        private H264CompatibilityStream compatibility;
+        private RtspServer compatibilitySdp;
+        private FrameData lastKeyframe;
+        private VideoStreamInfo videoInfo = new(VideoCodec.H264, 1280, 720, 12, false);
+        internal int BoundPort => ((IPEndPoint)listener.LocalEndpoint).Port;
 
         public RtspServer(int port, bool secure, string username, string password)
         {
@@ -58,7 +64,12 @@ namespace V380Decoder.src
                     int id = Interlocked.Increment(ref nextId);
                     var s = new RtspSession(id, tcp, this, secure);
                     sessions[id] = s;
-                    s.OnClose += () => sessions.TryRemove(id, out _);
+                    s.OnClose += () =>
+                    {
+                        sessions.TryRemove(id, out _);
+                        lock (compatibilityLock)
+                            if (!sessions.Values.Any(s => s.CompatibilityVideo)) StopCompatibility();
+                    };
                     s.Start();
                 }
                 catch { }
@@ -69,7 +80,10 @@ namespace V380Decoder.src
         public void PushVideo(FrameData f)
         {
             CacheParameterSets(f);
-            foreach (var s in sessions.Values) s.PushVideo(f);
+            foreach (var s in sessions.Values)
+                if (!s.CompatibilityVideo || f.Codec == VideoCodec.H264) s.PushVideo(f);
+            lock (compatibilityLock)
+                if (f.Codec == VideoCodec.H265) compatibility?.Push(WithParameterSets(f));
         }
 
         // Called from main receive loop for every complete audio frame
@@ -90,6 +104,7 @@ namespace V380Decoder.src
                     cachedVps = null;
                     cachedSps = null;
                     cachedPps = null;
+                    lastKeyframe = null;
                     Console.Error.WriteLine($"[RTSP] video codec={cachedCodec}");
                 }
 
@@ -106,7 +121,66 @@ namespace V380Decoder.src
                     if (nalType == 33) cachedSps = nal;
                     if (nalType == 34) cachedPps = nal;
                 });
+                int width = videoInfo.Width, height = videoInfo.Height;
+                if (frame.Codec == VideoCodec.H265 && HevcSpsParser.TryGetDimensions(cachedSps, out int w, out int h))
+                { width = w; height = h; }
+                videoInfo = new(frame.Codec, width, height, frame.FrameRate is > 0 and <= 120 ? frame.FrameRate : 12);
+                if (frame.IsKeyframe) lastKeyframe = frame;
             }
+        }
+
+        private FrameData WithParameterSets(FrameData frame)
+        {
+            if (!frame.IsKeyframe) return frame;
+            lock (sdpLock)
+            {
+                using var payload = new MemoryStream();
+                foreach (var nal in new[] { cachedVps, cachedSps, cachedPps })
+                    if (nal != null) { payload.Write(new byte[] { 0, 0, 0, 1 }); payload.Write(nal); }
+                payload.Write(frame.Payload);
+                return new FrameData { Codec = frame.Codec, RawType = frame.RawType, FrameRate = frame.FrameRate, Payload = payload.ToArray() };
+            }
+        }
+
+        internal string Describe(bool compatible)
+        {
+            if (!compatible) return BuildSdp();
+            H264CompatibilityStream encoder;
+            RtspServer description;
+            lock (compatibilityLock)
+            {
+                VideoStreamInfo info;
+                lock (sdpLock) info = videoInfo;
+                if (!info.Known) throw new IOException("Camera video is not ready");
+                if (info.Codec == VideoCodec.H264) return BuildSdp();
+                if (compatibility == null || compatibility.Completion.IsCompleted)
+                {
+                    StopCompatibility();
+                    compatibilitySdp = new RtspServer(0, false, "", "");
+                    var cache = compatibilitySdp;
+                    compatibility = new H264CompatibilityStream(info, frame =>
+                    {
+                        if (!ReferenceEquals(compatibilitySdp, cache)) return;
+                        cache.CacheParameterSets(frame);
+                        foreach (var session in sessions.Values)
+                            if (session.CompatibilityVideo) session.PushVideo(frame);
+                    });
+                    FrameData key;
+                    lock (sdpLock) key = lastKeyframe;
+                    if (key != null) compatibility.Push(WithParameterSets(key));
+                }
+                encoder = compatibility;
+                description = compatibilitySdp;
+            }
+            encoder.Ready.WaitAsync(TimeSpan.FromSeconds(8)).GetAwaiter().GetResult();
+            return description.BuildSdp();
+        }
+
+        private void StopCompatibility()
+        {
+            compatibility?.Dispose();
+            compatibility = null;
+            compatibilitySdp = null;
         }
 
         // Walk Annex-B start codes, call cb(nalType, nalBytes) for each NAL.
@@ -187,6 +261,7 @@ namespace V380Decoder.src
             running = false;
             try { listener?.Stop(); } catch { }
             foreach (var s in sessions.Values) s.Close();
+            lock (compatibilityLock) StopCompatibility();
         }
     }
 }

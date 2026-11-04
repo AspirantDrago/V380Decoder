@@ -9,6 +9,7 @@ internal static class OnvifEndpoints
     public static string StreamUri(HttpContext ctx, int port) => ctx.Items[RtspKey] as string ??
         new UriBuilder("rtsp", new Uri(HttpBase(ctx)).Host, port, "/live").Uri.AbsoluteUri;
     public static string SnapshotUri(HttpContext ctx) => HttpBase(ctx) + "/snapshot";
+    public static string CompatibilityStreamUri(HttpContext ctx, int port) => StreamUri(ctx, port).TrimEnd('/') + "/h264";
 
     public static string Validate(string value, params string[] schemes)
     {

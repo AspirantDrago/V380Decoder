@@ -14,10 +14,11 @@ namespace V380Decoder.src
     {
       var request = new OnvifSoap(body);
       action = request.Action;
+      var clock = ctx.Items[OnvifClock.ContextKey] as OnvifClock ?? new OnvifClock();
       bool anonymous = action is "GetSystemDateAndTime" or "GetCapabilities" or "GetScopes";
       if (secure && (request.UsernameToken != null || (!anonymous && !transportAuthenticated)))
       {
-        string error = request.ValidateUsernameToken(username, password);
+        string error = request.ValidateUsernameToken(username, password, clock.UtcNow);
         if (error != null)
         {
           ctx.Response.StatusCode = 400;
@@ -30,7 +31,13 @@ namespace V380Decoder.src
         if (XDocument.Parse(media).Descendants().Any(e => e.Name.LocalName == "Fault")) ctx.Response.StatusCode = 400;
         return media;
       }
-      if (Contains(action, body, "GetSystemDateAndTime")) return RespGetSystemDateAndTime();
+      if (Contains(action, body, "GetSystemDateAndTime")) return clock.Get();
+      else if (Contains(action, body, "SetSystemDateAndTime"))
+      {
+        string result = clock.Set(request);
+        if (result != null) { ctx.Response.StatusCode = 400; return result; }
+        return OnvifSoap.Envelope(new XElement((XNamespace)request.Namespace + "SetSystemDateAndTimeResponse"));
+      }
       else if (Contains(action, body, "GetDeviceInformation")) return RespGetDeviceInformation(camera);
       else if (Contains(action, body, "GetServices")) return OnvifServices.GetServices(ctx, request.Parameter("IncludeCapability") == "true");
       else if (Contains(action, body, "GetScopes")) return RespGetScopes();
@@ -42,6 +49,12 @@ namespace V380Decoder.src
       else if (Contains(action, body, "GetServiceCapabilities")) return RespServiceCapabilities(ctx, request.Namespace);
       else if (Contains(action, body, "GetPresets")) return RespGetPresets();
       else if (Contains(action, body, "GetNodes")) return RespGetNodes();
+      else if (Contains(action, body, "GetNode"))
+      {
+        if (request.Parameter("NodeToken") != "PTZNode_1")
+        { ctx.Response.StatusCode = 400; return OnvifSoap.Fault("NoEntity", "Unknown PTZ node token"); }
+        return RespGetNodes().Replace("GetNodesResponse", "GetNodeResponse", StringComparison.Ordinal);
+      }
       else if (Contains(action, body, "GetConfigurationOptions")) return RespGetConfigOptions();
       else if (Contains(action, body, "GetConfigurations")) return RespGetConfigurations();
       else if (Contains(action, body, "GetConfiguration")) return RespGetConfigurations().Replace("GetConfigurationsResponse", "GetConfigurationResponse", StringComparison.Ordinal);
@@ -112,31 +125,6 @@ namespace V380Decoder.src
         default: camera.LightAuto(); LogUtils.debug("[ONVIF] Light → AUTO"); break;
       }
       return SoapOk("SetImagingSettings");
-    }
-
-    private static string RespGetSystemDateAndTime()
-    {
-      var now = DateTime.UtcNow;
-      return Envelope($@"
-              <tds:GetSystemDateAndTimeResponse>
-                <tds:SystemDateAndTime>
-                  <tt:DateTimeType>NTP</tt:DateTimeType>
-                  <tt:DaylightSavings>false</tt:DaylightSavings>
-                  <tt:TimeZone><tt:TZ>UTC</tt:TZ></tt:TimeZone>
-                  <tt:UTCDateTime>
-                    <tt:Time>
-                      <tt:Hour>{now.Hour}</tt:Hour>
-                      <tt:Minute>{now.Minute}</tt:Minute>
-                      <tt:Second>{now.Second}</tt:Second>
-                    </tt:Time>
-                    <tt:Date>
-                      <tt:Year>{now.Year}</tt:Year>
-                      <tt:Month>{now.Month}</tt:Month>
-                      <tt:Day>{now.Day}</tt:Day>
-                    </tt:Date>
-                  </tt:UTCDateTime>
-                </tds:SystemDateAndTime>
-              </tds:GetSystemDateAndTimeResponse>");
     }
 
     private static string RespGetDeviceInformation(V380Client camera) => Envelope($@"

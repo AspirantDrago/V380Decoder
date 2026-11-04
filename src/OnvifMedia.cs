@@ -21,9 +21,9 @@ internal static class OnvifMedia
     {
         var result = Entity(name, "VideoEnc_1", "VideoEncoder", E("Encoding", info.Codec.ToString()), Resolution("Resolution", info));
         if (!media2) result.Add(E("Quality", 5));
-        result.Add(new XElement(T + "RateControl", E("FrameRateLimit", info.FrameRate), media2 ? null : E("EncodingInterval", 1), E("BitrateLimit", 4096)));
-        if (media2) { result.SetAttributeValue("GovLength", 30); result.Add(E("Quality", 5)); }
-        else result.Add(new XElement(T + "H264", E("GovLength", 30), E("H264Profile", "High")), Multicast(), E("SessionTimeout", "PT60S"));
+        result.Add(new XElement(T + "RateControl", E("FrameRateLimit", info.FrameRate), media2 ? null : E("EncodingInterval", 1), E("BitrateLimit", info.Bitrate)));
+        if (media2) { result.SetAttributeValue("GovLength", info.GovLength); result.Add(E("Quality", 5)); }
+        else result.Add(new XElement(T + "H264", E("GovLength", info.GovLength), E("H264Profile", info.H264Profile)), Multicast(), E("SessionTimeout", "PT60S"));
         return result;
     }
 
@@ -63,17 +63,29 @@ internal static class OnvifMedia
     {
         bool media2 = request.Namespace == OnvifSoap.Media2;
         if (!media2 && request.Namespace != OnvifSoap.Media1) return null;
+        bool compatibility = !media2 && info.Codec == VideoCodec.H265;
+        if (compatibility) info = H264CompatibilityStream.OutputInfo(info);
         XNamespace ns = media2 ? OnvifSoap.Media2 : OnvifSoap.Media1;
         string action = request.Action;
-        string Reply(params object[] fields) => OnvifSoap.Envelope(new XElement(ns + (action + "Response"), fields));
+        string Reply(params object[] fields)
+        {
+            var response = new XElement(ns + (action + "Response"), fields);
+            if (compatibility)
+            {
+                string Map(string value) => value switch { "Profile_1" => "Profile_H264", "VideoEnc_1" => "VideoEnc_H264",
+                    "VideoSrcCfg_1" => "VideoSrcCfg_H264", "VideoSource_1" => "VideoSource_H264", _ => value };
+                foreach (var attribute in response.DescendantsAndSelf().Attributes("token")) attribute.Value = Map(attribute.Value);
+                foreach (var source in response.Descendants(T + "SourceToken")) source.Value = Map(source.Value);
+            }
+            return OnvifSoap.Envelope(response);
+        }
         string profile = request.Parameter(media2 && action == "GetProfiles" ? "Token" : "ProfileToken");
-        if (profile != null && profile != "Profile_1") return OnvifSoap.Fault("NoProfile", "Unknown profile token");
+        if (profile != null && profile != (compatibility ? "Profile_H264" : "Profile_1")) return OnvifSoap.Fault("NoProfile", "Unknown profile token");
         string token = request.Parameter("ConfigurationToken");
         string expectedToken = action.Contains("VideoEncoder") ? "VideoEnc_1" : action.Contains("AudioEncoder") ? "AudioEnc_1" :
             action.Contains("VideoSource") ? "VideoSrcCfg_1" : action.Contains("AudioSource") ? "AudioSrcCfg_1" : null;
+        if (compatibility && expectedToken is "VideoEnc_1" or "VideoSrcCfg_1") expectedToken = expectedToken.Replace("_1", "_H264");
         if (token != null && token != expectedToken) return OnvifSoap.Fault("NoConfig", "Unknown configuration token");
-        if (!media2 && info.Codec == VideoCodec.H265 && new[] { "GetProfiles", "GetProfile", "GetVideoEncoderConfigurations", "GetVideoEncoderConfiguration", "GetCompatibleVideoEncoderConfigurations", "GetVideoEncoderConfigurationOptions" }.Contains(action))
-            return OnvifSoap.Fault("ActionNotSupported", "HEVC is available through the Media2 service advertised by GetServices");
         switch (action)
         {
             case "GetProfiles":
@@ -83,10 +95,10 @@ internal static class OnvifMedia
             case "GetStreamUri":
                 string protocol = request.Operation.Descendants().FirstOrDefault(e => e.Name.LocalName == "Protocol")?.Value;
                 string streamType = request.Operation.Descendants().FirstOrDefault(e => e.Name.LocalName == "Stream")?.Value;
-                if ((media2 && protocol != null && protocol != "RtspUnicast") ||
+                if ((media2 && protocol != null && protocol != "RtspUnicast" && protocol != "RTSP") ||
                     (!media2 && (streamType == "RTP-Multicast" || protocol == "HTTP")))
                     return OnvifSoap.Fault("ActionNotSupported", "Only unicast RTSP streaming is supported");
-                string uri = OnvifEndpoints.StreamUri(ctx, rtspPort);
+                string uri = compatibility ? OnvifEndpoints.CompatibilityStreamUri(ctx, rtspPort) : OnvifEndpoints.StreamUri(ctx, rtspPort);
                 return media2 ? Reply(new XElement(ns + "Uri", uri)) : Reply(new XElement(ns + "MediaUri",
                     E("Uri", uri), E("InvalidAfterConnect", false), E("InvalidAfterReboot", false), E("Timeout", "PT0S")));
             case "GetSnapshotUri":
@@ -118,8 +130,8 @@ internal static class OnvifMedia
                     new XAttribute("FrameRatesSupported", info.FrameRate), E("Encoding", info.Codec.ToString()), range,
                     Resolution("ResolutionsAvailable", info), new XElement(T + "BitrateRange", E("Min", 4096), E("Max", 4096))));
                 return Reply(new XElement(ns + "Options", range, new XElement(T + "H264", Resolution("ResolutionsAvailable", info),
-                    new XElement(T + "GovLengthRange", E("Min", 30), E("Max", 30)), new XElement(T + "FrameRateRange", E("Min", info.FrameRate), E("Max", info.FrameRate)),
-                    new XElement(T + "EncodingIntervalRange", E("Min", 1), E("Max", 1)), E("H264ProfilesSupported", "High"))));
+                    new XElement(T + "GovLengthRange", E("Min", info.GovLength), E("Max", info.GovLength)), new XElement(T + "FrameRateRange", E("Min", info.FrameRate), E("Max", info.FrameRate)),
+                    new XElement(T + "EncodingIntervalRange", E("Min", 1), E("Max", 1)), E("H264ProfilesSupported", info.H264Profile))));
             case "GetAudioEncoderConfigurationOptions":
                 var option = new XElement(media2 ? ns + "Options" : T + "Options", E("Encoding", media2 ? "PCMA" : "G711"),
                     new XElement(T + "BitrateList", E("Items", 64)), new XElement(T + "SampleRateList", E("Items", 8)));

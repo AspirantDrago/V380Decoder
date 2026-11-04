@@ -171,11 +171,28 @@ accepts Digest or Basic authentication and supports UDP unicast, TCP
 interleaving, and `GET_PARAMETER` keepalives. Unsupported operations return
 SOAP faults rather than claiming that a camera setting was changed.
 
-H.264 is exposed through Media1 and Media2. Native H.265 is exposed through
-Media2 (`/onvif/media2_service`); a recorder limited to Media1 cannot use an
-HEVC stream through this bridge without transcoding. Video codec,
-resolution, and frame rate are taken from the received stream, including
-HEVC SPS dimensions. The bridge preserves the native video codec.
+H.264 cameras are exposed through Media1 and Media2 without transcoding.
+For H.265 cameras, Media2 (`/onvif/media2_service`) and RTSP `/live` preserve
+the native HEVC stream. Media1 clients (including older NVRs and ONVIF tools)
+instead receive `Profile_H264` and RTSP `/live/h264`: a real Baseline H.264
+stream encoded by FFmpeg, with PCMA audio. Its resolution fits within
+1920x1080 while preserving aspect ratio and even dimensions; the original
+HEVC resolution is unchanged. Media2 accepts both `RtspUnicast` (UDP) and
+`RTSP` (TCP) stream requests.
+
+The compatibility encoder starts on RTSP DESCRIBE, is shared by all H.264
+viewers of the same camera, and stops when the last viewer disconnects.
+It uses additional CPU while active. FFmpeg with `libx264` is required
+(included in the Docker image). If it cannot start, RTSP returns `503` and
+logs the encoder error instead of mislabeling HEVC as H.264. Video codec,
+resolution, and frame rate for the native stream are taken from the
+received video, including HEVC SPS dimensions.
+
+`GetNode` returns the same PTZ node as `GetNodes`. NVR
+`SetSystemDateAndTime` requests update only the bridge's in-memory ONVIF
+clock and time-zone metadata; they never change the host or camera clock.
+Manual time advances from the requested UTC time, and NTP mode follows
+the host UTC clock. These settings reset when the bridge restarts.
 
 For Dahua or another NVR, enable `--enable-onvif` and add the **decoder
 server's IP and HTTP port** as an ONVIF device. Use the camera credentials

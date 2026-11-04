@@ -235,7 +235,8 @@ namespace V380Decoder.src
                 }
             }
             if (client != null && !client.StreamInfo.Known &&
-                request.Action is "GetProfiles" or "GetProfile" or "GetVideoEncoderConfigurations" or "GetVideoEncoderConfiguration")
+                request.Action is "GetProfiles" or "GetProfile" or "GetVideoEncoderConfigurations" or "GetVideoEncoderConfiguration" or
+                    "GetOSDs" or "GetOSD" or "GetOSDOptions")
             {
                 try { await client.VideoReady.WaitAsync(TimeSpan.FromSeconds(3), ctx.RequestAborted); }
                 catch (TimeoutException)
@@ -254,7 +255,7 @@ namespace V380Decoder.src
             if (ctx.Response.StatusCode >= 400)
                 Console.Error.WriteLine($"[ONVIF] {request.Action} status={ctx.Response.StatusCode} " +
                     XDocument.Parse(response).Descendants().FirstOrDefault(e => e.Name.LocalName is "Text" or "faultstring")?.Value);
-            else if (request.Action is "GetServices" or "GetProfiles" or "GetStreamUri")
+            else if (request.Action is "GetServices" or "GetProfiles" or "GetStreamUri" or "GetOSDs" or "GetOSD" or "GetOSDOptions")
                 Console.Error.WriteLine($"[ONVIF] {request.Namespace}/{request.Action} status={ctx.Response.StatusCode}");
             else LogUtils.debug($"[ONVIF] {request.Namespace}/{request.Action} status={ctx.Response.StatusCode}");
             await ctx.Response.WriteAsync(response);

@@ -197,7 +197,14 @@ the host UTC clock. These settings reset when the bridge restarts.
 
 Set the camera name in the container arguments with `--camera-name "Вход"`.
 The default is `V380`. The value is used in ONVIF discovery, media profile
-names, and the RTSP session name. Each container can have its own value.
+names, the RTSP session name, and read-only ONVIF OSD title metadata
+(`GetOSDs`, Media1 `GetOSD`, `GetOSDOptions`). Each container can have its own
+value. OSD reads return a persistent `Text` / `Plain` title associated with
+the selected video source configuration, including the H.264 compatibility
+source. The title is configured only through `--camera-name`; ONVIF OSD
+write operations return a fault. This metadata does not burn text into the
+video image. Successful OSD reads are logged as `[ONVIF] ... GetOSDs ...`
+so a recorder's title retrieval can be verified.
 
 For Dahua or another NVR, enable `--enable-onvif` and add the **decoder
 server's IP and HTTP port** as an ONVIF device. Use the camera credentials

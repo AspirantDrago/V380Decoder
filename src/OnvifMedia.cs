@@ -52,7 +52,7 @@ internal static class OnvifMedia
     internal static XElement Capabilities(bool media2)
     {
         XNamespace ns = media2 ? OnvifSoap.Media2 : OnvifSoap.Media1;
-        return new XElement(ns + "Capabilities", new XAttribute("SnapshotUri", true),
+        return new XElement(ns + "Capabilities", new XAttribute("SnapshotUri", true), new XAttribute("OSD", true),
             new XElement(ns + "ProfileCapabilities", new XAttribute("MaximumNumberOfProfiles", 1),
                 media2 ? new XAttribute("ConfigurationsSupported", "VideoSource AudioSource VideoEncoder AudioEncoder PTZ") : null),
             new XElement(ns + "StreamingCapabilities", media2 ? new XAttribute("RTSPStreaming", true) : null,
@@ -67,6 +67,8 @@ internal static class OnvifMedia
         if (compatibility) info = H264CompatibilityStream.OutputInfo(info);
         XNamespace ns = media2 ? OnvifSoap.Media2 : OnvifSoap.Media1;
         string action = request.Action;
+        if (action is "GetOSDs" or "GetOSD" or "GetOSDOptions" or "SetOSD" or "CreateOSD" or "DeleteOSD")
+            return OnvifOsd.Handle(request, ctx, compatibility);
         string Reply(params object[] fields)
         {
             var response = new XElement(ns + (action + "Response"), fields);

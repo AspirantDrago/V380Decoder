@@ -174,11 +174,8 @@ namespace V380Decoder.src
         return OnvifSoap.Envelope(new XElement((XNamespace)"http://www.onvif.org/ver10/device/wsdl" + "GetServiceCapabilitiesResponse", OnvifServices.DeviceCapabilities()));
     }
 
-    private static string RespMediaServiceCapabilities() => Envelope(@"
-              <trt:GetServiceCapabilitiesResponse>
-                <trt:Capabilities SnapshotUri=""true"" Rotation=""false""
-                  VideoSourceMode=""false"" OSD=""false""/>
-              </trt:GetServiceCapabilitiesResponse>");
+    private static string RespMediaServiceCapabilities() => OnvifSoap.Envelope(new XElement(
+        (XNamespace)OnvifSoap.Media1 + "GetServiceCapabilitiesResponse", OnvifMedia.Capabilities(false)));
 
     private static string RespPtzServiceCapabilities() => Envelope(@"
               <tptz:GetServiceCapabilitiesResponse>

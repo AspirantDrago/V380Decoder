@@ -87,7 +87,9 @@ namespace V380Decoder.src
                 try
                 {
                     monitoring.BeginConnection();
+                    var authWatch = Stopwatch.StartNew();
                     int auth = GetAuthTicket(ct);
+                    monitoring.SetAuthDuration(authWatch.ElapsedMilliseconds);
                     if (auth != 1)
                     {
                         monitoring.AuthenticationFailed(auth == -1);
@@ -96,7 +98,10 @@ namespace V380Decoder.src
                     else
                     {
                         monitoring.Authenticated(deviceVersion);
-                        if (!StreamLogin(ct))
+                        var streamLoginWatch = Stopwatch.StartNew();
+                        bool streamLoggedIn = StreamLogin(ct);
+                        monitoring.SetStreamLoginDuration(streamLoginWatch.ElapsedMilliseconds);
+                        if (!streamLoggedIn)
                         {
                             monitoring.StreamLoginFailed();
                         }
@@ -239,6 +244,7 @@ namespace V380Decoder.src
                 LogUtils.debug($"[AUTH] domain: {domain}");
 
                 deviceVersion = version;
+                monitoring.SetDeviceIdentity(deviceType, camType, (int)vendorId);
                 sessionId = session;
                 authTicket = ticket;
 

@@ -119,7 +119,8 @@ if (args.Length > 0)
             password,
             onvifUrl,
             advertisedRtspUrl,
-            cameraName);
+            cameraName,
+            rtsp);
         webServer.Start();
     }
 

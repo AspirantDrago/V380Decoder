@@ -10,6 +10,8 @@ internal sealed class CameraMonitoring
         public long Second = -1;
         public int VideoFrames;
         public long VideoBytes;
+        public long UpstreamBytes;
+        public int UpstreamPackets;
         public int AudioFrames;
         public long AudioBytes;
     }
@@ -27,6 +29,11 @@ internal sealed class CameraMonitoring
     private int connected;
     private int deviceVersion;
     private int communicationVersion;
+    private int deviceType;
+    private int cameraType;
+    private int vendorId;
+    private long authDurationMs;
+    private long streamLoginDurationMs;
     private long lastErrorAt;
     private long lastAuthSuccessAt;
     private long lastStreamStartAt;
@@ -79,6 +86,19 @@ internal sealed class CameraMonitoring
         RecordError("stream_login_failed");
     }
 
+    public void SetDeviceIdentity(int deviceTypeValue, int cameraTypeValue, int vendorIdValue)
+    {
+        Interlocked.Exchange(ref deviceType, deviceTypeValue);
+        Interlocked.Exchange(ref cameraType, cameraTypeValue);
+        Interlocked.Exchange(ref vendorId, vendorIdValue);
+    }
+
+    public void SetAuthDuration(long milliseconds) =>
+        Interlocked.Exchange(ref authDurationMs, milliseconds);
+
+    public void SetStreamLoginDuration(long milliseconds) =>
+        Interlocked.Exchange(ref streamLoginDurationMs, milliseconds);
+
     public void SetCommunicationVersion(int version) =>
         Interlocked.Exchange(ref communicationVersion, version);
 
@@ -124,6 +144,7 @@ internal sealed class CameraMonitoring
         Interlocked.Increment(ref packetsReceived);
         Interlocked.Add(ref networkBytesReceived, 12 + payloadSize);
         Interlocked.Exchange(ref lastPacketAtMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        RecordTraffic(12 + payloadSize, 2);
     }
 
     public void VideoDecodeError()
@@ -143,7 +164,7 @@ internal sealed class CameraMonitoring
         Volatile.Write(ref videoDecryptMode, decryptMode);
         Interlocked.Exchange(ref videoHeaderBytes, headerBytes);
         Interlocked.Exchange(ref videoDecryptScore, decryptScore);
-        RecordTraffic(bytes, true);
+        RecordTraffic(bytes, 0);
     }
 
     public void AudioDecoded(int bytes, string codec)
@@ -152,7 +173,7 @@ internal sealed class CameraMonitoring
         Interlocked.Add(ref audioBytes, bytes);
         Interlocked.Exchange(ref lastAudioAtMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         Volatile.Write(ref audioCodec, codec);
-        RecordTraffic(bytes, false);
+        RecordTraffic(bytes, 1);
     }
 
     private void RecordError(string category)
@@ -162,7 +183,7 @@ internal sealed class CameraMonitoring
         Interlocked.Exchange(ref lastErrorAt, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
     }
 
-    private void RecordTraffic(int bytes, bool video)
+    private void RecordTraffic(int bytes, int kind)
     {
         long second = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         lock (trafficLock)
@@ -173,19 +194,26 @@ internal sealed class CameraMonitoring
                 bucket.Second = second;
                 bucket.VideoFrames = 0;
                 bucket.VideoBytes = 0;
+                bucket.UpstreamBytes = 0;
+                bucket.UpstreamPackets = 0;
                 bucket.AudioFrames = 0;
                 bucket.AudioBytes = 0;
             }
 
-            if (video)
+            if (kind == 0)
             {
                 bucket.VideoFrames++;
                 bucket.VideoBytes += bytes;
             }
-            else
+            else if (kind == 1)
             {
                 bucket.AudioFrames++;
                 bucket.AudioBytes += bytes;
+            }
+            else
+            {
+                bucket.UpstreamPackets++;
+                bucket.UpstreamBytes += bytes;
             }
         }
     }
@@ -196,7 +224,7 @@ internal sealed class CameraMonitoring
     {
         long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         long nowSecond = nowMs / 1000;
-        long vf = 0, vb = 0, af = 0, ab = 0;
+        long vf = 0, vb = 0, af = 0, ab = 0, nb = 0, np = 0;
 
         lock (trafficLock)
             foreach (var bucket in traffic)
@@ -206,6 +234,8 @@ internal sealed class CameraMonitoring
                     vb += bucket.VideoBytes;
                     af += bucket.AudioFrames;
                     ab += bucket.AudioBytes;
+                    nb += bucket.UpstreamBytes;
+                    np += bucket.UpstreamPackets;
                 }
 
         long videoAge = AgeSeconds(nowMs, Interlocked.Read(ref lastVideoAtMs));
@@ -230,6 +260,11 @@ internal sealed class CameraMonitoring
             discovered_gateway = device?.Gateway ?? "",
             device_version = Volatile.Read(ref deviceVersion),
             communication_version = Volatile.Read(ref communicationVersion),
+            device_type = Volatile.Read(ref deviceType),
+            camera_type = Volatile.Read(ref cameraType),
+            vendor_id = Volatile.Read(ref vendorId),
+            last_auth_duration_ms = Interlocked.Read(ref authDurationMs),
+            last_stream_login_duration_ms = Interlocked.Read(ref streamLoginDurationMs),
             process_uptime_seconds = (long)uptime.Elapsed.TotalSeconds,
             process_started_unixtime = startedAt,
             connection_state = Volatile.Read(ref connectionState),
@@ -258,6 +293,8 @@ internal sealed class CameraMonitoring
             unknown_packets_total = Interlocked.Read(ref unknownPackets),
             packets_received_total = Interlocked.Read(ref packetsReceived),
             network_bytes_received_total = Interlocked.Read(ref networkBytesReceived),
+            upstream_bitrate_bps_10s = nb * 8.0 / 10.0,
+            upstream_packets_per_second_10s = np / 10.0,
             video_frames_total = Interlocked.Read(ref videoFrames),
             video_bytes_total = Interlocked.Read(ref videoBytes),
             video_keyframes_total = Interlocked.Read(ref videoKeyframes),
@@ -281,7 +318,10 @@ internal sealed class CameraMonitoring
             http_port = httpPort,
             rtsp_clients = rtsp?.SessionCount ?? 0,
             rtsp_playing_clients = rtsp?.PlayingSessionCount ?? 0,
-            rtsp_h264_compatibility_clients = rtsp?.CompatibilitySessionCount ?? 0
+            rtsp_h264_compatibility_clients = rtsp?.CompatibilitySessionCount ?? 0,
+            rtsp_video_subscribers = rtsp?.VideoSubscriberCount ?? 0,
+            rtsp_audio_subscribers = rtsp?.AudioSubscriberCount ?? 0,
+            rtsp_udp_clients = rtsp?.UdpClientCount ?? 0
         };
     }
 
@@ -306,6 +346,11 @@ public sealed class CameraMetricsSnapshot
     public string discovered_gateway { get; set; }
     public int device_version { get; set; }
     public int communication_version { get; set; }
+    public int device_type { get; set; }
+    public int camera_type { get; set; }
+    public int vendor_id { get; set; }
+    public long last_auth_duration_ms { get; set; }
+    public long last_stream_login_duration_ms { get; set; }
     public long process_uptime_seconds { get; set; }
     public long process_started_unixtime { get; set; }
     public string connection_state { get; set; }
@@ -334,6 +379,8 @@ public sealed class CameraMetricsSnapshot
     public long unknown_packets_total { get; set; }
     public long packets_received_total { get; set; }
     public long network_bytes_received_total { get; set; }
+    public double upstream_bitrate_bps_10s { get; set; }
+    public double upstream_packets_per_second_10s { get; set; }
     public long video_frames_total { get; set; }
     public long video_bytes_total { get; set; }
     public long video_keyframes_total { get; set; }
@@ -358,4 +405,7 @@ public sealed class CameraMetricsSnapshot
     public int rtsp_clients { get; set; }
     public int rtsp_playing_clients { get; set; }
     public int rtsp_h264_compatibility_clients { get; set; }
+    public int rtsp_video_subscribers { get; set; }
+    public int rtsp_audio_subscribers { get; set; }
+    public int rtsp_udp_clients { get; set; }
 }

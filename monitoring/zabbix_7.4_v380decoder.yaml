@@ -1,0 +1,1014 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+    - uuid: 6354a56f3b0f5693de07bd6bcdd1db21
+      name: 'Templates/Applications'
+  templates:
+    - uuid: a0c8aacdd15e3451aa96d9596ca30853
+      template: 'V380 Decoder by HTTP'
+      name: 'V380 Decoder by HTTP'
+      description: 'V380Decoder authenticated metrics API; 1 HTTP request per poll with dependent JSONPath items. One Zabbix host per decoder instance.'
+      groups:
+        - name: 'Templates/Applications'
+      items:
+        - uuid: f5812e0538c82ec1f480cc397d1bb87f
+          name: 'V380: metrics JSON'
+          type: HTTP_AGENT
+          key: v380.metrics.raw
+          delay: '{$V380.UPDATE.INTERVAL}'
+          history: 1d
+          value_type: TEXT
+          timeout: 5s
+          url: '{$V380.SCHEME}://{HOST.CONN}:{$V380.HTTP.PORT}/api/metrics'
+          authtype: BASIC
+          username: '{$V380.USER}'
+          password: '{$V380.PASSWORD}'
+          status_codes: '200'
+          tags:
+            - tag: component
+              value: http
+          triggers:
+            - uuid: c136bedd0921e92922c0c521674ca5a7
+              expression: 'nodata(/V380 Decoder by HTTP/v380.metrics.raw,2m)=1'
+              name: 'V380: monitoring API has no data for 2 minutes'
+              priority: HIGH
+        - uuid: 10ffcc218fc0c5053cf050ad4c6b684b
+          name: 'V380: Schema version'
+          type: DEPENDENT
+          key: v380.schema_version
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.schema_version'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: system
+        - uuid: 0e2d920bb41600cf592c35a7348d4a91
+          name: 'V380: Sample time'
+          type: DEPENDENT
+          key: v380.timestamp_unixtime
+          value_type: UNSIGNED
+          units: 'unixtime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.timestamp_unixtime'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: system
+        - uuid: ecc1575af6bb1a0e811e9dd62f037b04
+          name: 'V380: Camera ID'
+          type: DEPENDENT
+          key: v380.camera_id
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.camera_id'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 85c9a1942931d68815adda0057c3b36a
+          name: 'V380: Camera name'
+          type: DEPENDENT
+          key: v380.camera_name
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.camera_name'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 71b0aec474f162585f4c98700fcb53e6
+          name: 'V380: Connection source'
+          type: DEPENDENT
+          key: v380.source
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.source'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 99e6645f7adfa66b2183d5332b744ea9
+          name: 'V380: Upstream address'
+          type: DEPENDENT
+          key: v380.upstream_address
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.upstream_address'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 91254662b10b97beb988c406f7a2ed34
+          name: 'V380: Upstream port'
+          type: DEPENDENT
+          key: v380.upstream_port
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.upstream_port'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 366697ab0effc607077d9dff3d6557c5
+          name: 'V380: Discovered MAC'
+          type: DEPENDENT
+          key: v380.device_mac
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.device_mac'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 1a481f4a8cf677d68e10a7fedb7e6150
+          name: 'V380: Discovered IP'
+          type: DEPENDENT
+          key: v380.discovered_device_ip
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.discovered_device_ip'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: c64e044913d5863599e3dfad1873ccb3
+          name: 'V380: Discovered subnet'
+          type: DEPENDENT
+          key: v380.discovered_subnet
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.discovered_subnet'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 245e7f7abcea176e14ecff9653e773f4
+          name: 'V380: Discovered gateway'
+          type: DEPENDENT
+          key: v380.discovered_gateway
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.discovered_gateway'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 3c4929a4bc2bf4f821b1caf01633e89e
+          name: 'V380: Device protocol version'
+          type: DEPENDENT
+          key: v380.device_version
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.device_version'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 345a0c8c05388da8f219c1a0e5192afa
+          name: 'V380: Communication protocol version'
+          type: DEPENDENT
+          key: v380.communication_version
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.communication_version'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 86214af563c92e619a7d9379dccb6727
+          name: 'V380: Process uptime'
+          type: DEPENDENT
+          key: v380.process_uptime_seconds
+          value_type: UNSIGNED
+          units: 'uptime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.process_uptime_seconds'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: c34a2ca2515c7bc6c80e912e6127355c
+          name: 'V380: Process start'
+          type: DEPENDENT
+          key: v380.process_started_unixtime
+          value_type: UNSIGNED
+          units: 'unixtime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.process_started_unixtime'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: e694dba31e64867713876b8f320b5ba9
+          name: 'V380: Connection state'
+          type: DEPENDENT
+          key: v380.connection_state
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.connection_state'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: f02c75f98df5568d45b951a5dacfa3d3
+          name: 'V380: Upstream connected'
+          type: DEPENDENT
+          key: v380.stream_connected
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.stream_connected'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+          triggers:
+            - uuid: ac641cb0f5d2564c4aa7a244b3ef660e
+              expression: 'max(/V380 Decoder by HTTP/v380.stream_connected,2m)=0'
+              name: 'V380: upstream disconnected for 2 minutes'
+              priority: HIGH
+        - uuid: 2c442e92645cfcd677a99b1e07a24f04
+          name: 'V380: Video healthy (15s)'
+          type: DEPENDENT
+          key: v380.video_healthy
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_healthy'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+          triggers:
+            - uuid: dfdece752703bb9158a7ba190f10918f
+              expression: 'max(/V380 Decoder by HTTP/v380.video_healthy,2m)=0'
+              name: 'V380: video unavailable for 2 minutes'
+              priority: HIGH
+        - uuid: 4babaf67f7852f53f0c3913b054a020d
+          name: 'V380: Audio healthy (15s)'
+          type: DEPENDENT
+          key: v380.audio_healthy
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.audio_healthy'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 45348db0a924419c37e8c4e44615d13a
+          name: 'V380: Session uptime'
+          type: DEPENDENT
+          key: v380.stream_uptime_seconds
+          value_type: UNSIGNED
+          units: 's'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.stream_uptime_seconds'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 124e4366c12016e245965f8a5b2d4750
+          name: 'V380: Last successful authentication'
+          type: DEPENDENT
+          key: v380.last_auth_success_unixtime
+          value_type: UNSIGNED
+          units: 'unixtime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_auth_success_unixtime'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 9f5fd4794d866c6d19dfae957b9da1d7
+          name: 'V380: Last stream start'
+          type: DEPENDENT
+          key: v380.last_stream_start_unixtime
+          value_type: UNSIGNED
+          units: 'unixtime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_stream_start_unixtime'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 9413aafd2a122fc97fad09418b1a6343
+          name: 'V380: Last video frame'
+          type: DEPENDENT
+          key: v380.last_video_unixtime
+          value_type: UNSIGNED
+          units: 'unixtime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_video_unixtime'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 7c7d7fd2268ad886cce5587e87ba24ac
+          name: 'V380: Last audio frame'
+          type: DEPENDENT
+          key: v380.last_audio_unixtime
+          value_type: UNSIGNED
+          units: 'unixtime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_audio_unixtime'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: audio
+        - uuid: 4f140f7c3333cb006de445d852355ce6
+          name: 'V380: Last incoming packet'
+          type: DEPENDENT
+          key: v380.last_packet_unixtime
+          value_type: UNSIGNED
+          units: 'unixtime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_packet_unixtime'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: network
+        - uuid: f8a8221c5365a4f0249e7f68fe7d0c26
+          name: 'V380: Video frame age (-1=never)'
+          type: DEPENDENT
+          key: v380.video_frame_age_seconds
+          value_type: FLOAT
+          units: 's'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_frame_age_seconds'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 7571b6d9819e9095e63da86dd4524607
+          name: 'V380: Audio frame age (-1=never)'
+          type: DEPENDENT
+          key: v380.audio_frame_age_seconds
+          value_type: FLOAT
+          units: 's'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.audio_frame_age_seconds'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: audio
+        - uuid: 0ccc867f6f0f77ab2831b08344382871
+          name: 'V380: Incoming packet age (-1=never)'
+          type: DEPENDENT
+          key: v380.packet_age_seconds
+          value_type: FLOAT
+          units: 's'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.packet_age_seconds'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: network
+        - uuid: c5db77f084653e74fa755cccdaccf6b2
+          name: 'V380: Last error category'
+          type: DEPENDENT
+          key: v380.last_error
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_error'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 4039650210a4fdee204be976446ece18
+          name: 'V380: Last error timestamp'
+          type: DEPENDENT
+          key: v380.last_error_unixtime
+          value_type: UNSIGNED
+          units: 'unixtime'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_error_unixtime'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 94f0f86d81f301615ea08669e2606d37
+          name: 'V380: Connection attempts total'
+          type: DEPENDENT
+          key: v380.connection_attempts_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.connection_attempts_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 5882ec679d20d2335f5a75ebe1f18905
+          name: 'V380: Authentication attempts total'
+          type: DEPENDENT
+          key: v380.auth_attempts_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.auth_attempts_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 0cdd95b2486c10169e9db4de52550e08
+          name: 'V380: Authentication failures total'
+          type: DEPENDENT
+          key: v380.auth_failures_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.auth_failures_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+          triggers:
+            - uuid: 3dc58ff0f9bb18d4838523fcb7997d82
+              expression: 'change(/V380 Decoder by HTTP/v380.auth_failures_total)>0'
+              name: 'V380: new authentication failure'
+              priority: WARNING
+        - uuid: e64d4b76d2cf1aaa0fe515a2c261cb44
+          name: 'V380: Stream login failures total'
+          type: DEPENDENT
+          key: v380.stream_login_failures_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.stream_login_failures_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: ec11945610cc25621a43056a68ef034c
+          name: 'V380: Stream starts total'
+          type: DEPENDENT
+          key: v380.stream_starts_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.stream_starts_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 5e0fdcb0879558341a89037c2a01f71a
+          name: 'V380: Reconnect attempts total'
+          type: DEPENDENT
+          key: v380.reconnect_attempts_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.reconnect_attempts_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+          triggers:
+            - uuid: f21c45b7044a7c63c25cd11bceac85a1
+              expression: 'max(/V380 Decoder by HTTP/v380.reconnect_attempts_total,5m)-min(/V380 Decoder by HTTP/v380.reconnect_attempts_total,5m)>=3'
+              name: 'V380: at least 3 reconnect attempts in 5 minutes'
+              priority: WARNING
+        - uuid: f1d033fd24a25409c1f8f1b1705020d3
+          name: 'V380: Receive errors total'
+          type: DEPENDENT
+          key: v380.receive_errors_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.receive_errors_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 8f677f68e3d97a749e2e98dced3e2ef2
+          name: 'V380: Invalid fragment headers total'
+          type: DEPENDENT
+          key: v380.invalid_headers_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.invalid_headers_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: network
+        - uuid: a89ae49ad0643f7eb7bdd6961ae041a8
+          name: 'V380: Unknown packets total'
+          type: DEPENDENT
+          key: v380.unknown_packets_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.unknown_packets_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: network
+        - uuid: ea6c970d3322a3111e99f7d94b1b262b
+          name: 'V380: Received packets total'
+          type: DEPENDENT
+          key: v380.packets_received_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.packets_received_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: network
+        - uuid: 9dbe8054345aaf886c555f905c8b210e
+          name: 'V380: Received upstream bytes total'
+          type: DEPENDENT
+          key: v380.network_bytes_received_total
+          value_type: UNSIGNED
+          units: 'B'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.network_bytes_received_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: network
+        - uuid: b094c9fa0a86950e8f67a466a2201594
+          name: 'V380: Decoded video frames total'
+          type: DEPENDENT
+          key: v380.video_frames_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_frames_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 4e1d3b01f3e000b518910e7d0341049b
+          name: 'V380: Decoded video bytes total'
+          type: DEPENDENT
+          key: v380.video_bytes_total
+          value_type: UNSIGNED
+          units: 'B'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_bytes_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 7129adf366bbaf679f229a6fe248cd2d
+          name: 'V380: Video keyframes total'
+          type: DEPENDENT
+          key: v380.video_keyframes_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_keyframes_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 92e75a6a0a52d15e27ac2c264c852e54
+          name: 'V380: Video decode errors total'
+          type: DEPENDENT
+          key: v380.video_decode_errors_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_decode_errors_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+          triggers:
+            - uuid: d9ef0738dc7e7b3c30b268d41bb91b46
+              expression: 'change(/V380 Decoder by HTTP/v380.video_decode_errors_total)>0'
+              name: 'V380: invalid video frames detected'
+              priority: WARNING
+        - uuid: d44be079b121c6c54730c7fd4ae4daa7
+          name: 'V380: Decoded audio frames total'
+          type: DEPENDENT
+          key: v380.audio_frames_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.audio_frames_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: audio
+        - uuid: a005ff0805c327645e7edcac555016ee
+          name: 'V380: Decoded audio bytes total'
+          type: DEPENDENT
+          key: v380.audio_bytes_total
+          value_type: UNSIGNED
+          units: 'B'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.audio_bytes_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: audio
+        - uuid: 94ef7aec6593c500b94435e89be1514e
+          name: 'V380: Audio skipped frames total'
+          type: DEPENDENT
+          key: v380.audio_skipped_frames_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.audio_skipped_frames_total'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: audio
+        - uuid: 31fe01c53f45b079b20c6b11c0ab33bb
+          name: 'V380: Video codec'
+          type: DEPENDENT
+          key: v380.video_codec
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_codec'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: cdc1736f4d419c23a906a14b376be395
+          name: 'V380: Video width'
+          type: DEPENDENT
+          key: v380.video_width
+          value_type: UNSIGNED
+          units: 'px'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_width'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 62aa3b12471bc6deb99504266a46742c
+          name: 'V380: Video height'
+          type: DEPENDENT
+          key: v380.video_height
+          value_type: UNSIGNED
+          units: 'px'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_height'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 571d5406036f5152e5feca8a1b659f14
+          name: 'V380: Video nominal FPS'
+          type: DEPENDENT
+          key: v380.video_reported_fps
+          value_type: UNSIGNED
+          units: 'fps'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_reported_fps'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 19e4c384fe89b2b832af2ce06ce5e386
+          name: 'V380: Video measured FPS (10s)'
+          type: DEPENDENT
+          key: v380.video_measured_fps_10s
+          value_type: FLOAT
+          units: 'fps'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_measured_fps_10s'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 11e826b725896b7bf28cdab323b7ef6d
+          name: 'V380: Video bitrate (10s)'
+          type: DEPENDENT
+          key: v380.video_bitrate_bps_10s
+          value_type: FLOAT
+          units: 'bps'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_bitrate_bps_10s'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 80baad8bb57a9e27ead0a4ef61c1f3f1
+          name: 'V380: Audio frame rate (10s)'
+          type: DEPENDENT
+          key: v380.audio_measured_fps_10s
+          value_type: FLOAT
+          units: 'fps'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.audio_measured_fps_10s'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: audio
+        - uuid: bc0c12fe28ffa9eaa5cbf362bf10bfb0
+          name: 'V380: Audio bitrate (10s)'
+          type: DEPENDENT
+          key: v380.audio_bitrate_bps_10s
+          value_type: FLOAT
+          units: 'bps'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.audio_bitrate_bps_10s'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: audio
+        - uuid: c20289f848f606343bff596c8593eea2
+          name: 'V380: Audio output codec'
+          type: DEPENDENT
+          key: v380.audio_codec
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.audio_codec'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: audio
+        - uuid: ec10e7e87dbfb6dc9ab85c1413ba339e
+          name: 'V380: Video decryption mode'
+          type: DEPENDENT
+          key: v380.video_decrypt_mode
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_decrypt_mode'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: f687777cbfb35c502e7295789e963c42
+          name: 'V380: Video media header bytes'
+          type: DEPENDENT
+          key: v380.video_header_bytes
+          value_type: UNSIGNED
+          units: 'B'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_header_bytes'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: 252eebc31c44310f99c847473f86c8c9
+          name: 'V380: Video decryption score'
+          type: DEPENDENT
+          key: v380.video_decrypt_score
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.video_decrypt_score'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: video
+        - uuid: b9e6980ab5bcc6ae5926a8c66faee214
+          name: 'V380: RTSP listening port'
+          type: DEPENDENT
+          key: v380.rtsp_port
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.rtsp_port'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: rtsp
+        - uuid: dd31261df777b7294cc5f65185c38e3f
+          name: 'V380: HTTP listening port'
+          type: DEPENDENT
+          key: v380.http_port
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.http_port'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: http
+        - uuid: 6643f5f340d526ef7683bf37b446c24d
+          name: 'V380: RTSP connected clients'
+          type: DEPENDENT
+          key: v380.rtsp_clients
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.rtsp_clients'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: rtsp
+        - uuid: 6388c8861d7495b2cccd0b4a4d29a8d4
+          name: 'V380: RTSP playing clients'
+          type: DEPENDENT
+          key: v380.rtsp_playing_clients
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.rtsp_playing_clients'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: rtsp
+        - uuid: 0ff0f319c3501d05e480f15d944c8d0b
+          name: 'V380: RTSP H264 compatibility clients'
+          type: DEPENDENT
+          key: v380.rtsp_h264_compatibility_clients
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.rtsp_h264_compatibility_clients'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: rtsp
+      macros:
+        - macro: '{$V380.SCHEME}'
+          value: 'http'
+          description: 'Use https if the decoder API is served through a TLS reverse proxy.'
+        - macro: '{$V380.HTTP.PORT}'
+          value: '8080'
+          description: 'HTTP port published by this decoder instance.'
+        - macro: '{$V380.UPDATE.INTERVAL}'
+          value: '30s'
+          description: 'Single HTTP polling interval shared by every dependent item.'
+        - macro: '{$V380.USER}'
+          value: 'admin'
+          description: 'V380 decoder username when --secure is enabled.'
+        - macro: '{$V380.PASSWORD}'
+          value: ''
+          description: 'Set a host-level Secret text macro to override this blank value when --secure is enabled.'
+      tags:
+        - tag: class
+          value: camera
+        - tag: target
+          value: v380decoder

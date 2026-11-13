@@ -248,6 +248,12 @@ http://192.168.1.3:8080/onvif/device_service
 - ✅ Media profiles
 - ✅ Device discovery
 
+## Monitoring with Zabbix 7.4
+
+Use the authenticated `GET /api/metrics` endpoint (requires `--enable-api`) to monitor camera connection, decoded video/audio, errors and reconnects. It exposes 75 measurements using the same `--secure` Basic/Digest authentication as the existing REST API. The existing `GET /api/status` remains compatible but only reports that the API is running.
+
+Import the ready-made [V380 Decoder by HTTP Zabbix 7.4 template](monitoring/zabbix_7.4_v380decoder.yaml). See [monitoring instructions](monitoring/README.md) for configuration, security, trigger behavior and the meaning of each metric.
+
 ## Web UI & REST API
 
 Control your camera through a web interface or REST API.

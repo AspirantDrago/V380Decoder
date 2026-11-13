@@ -34,6 +34,9 @@ namespace V380Decoder.src
 
         public event Action OnClose;
         internal bool IsPlaying => playing;
+        internal bool IsVideoSubscriber => playing && videoSetup;
+        internal bool IsAudioSubscriber => playing && audioSetup;
+        internal bool IsUdpClient => playing && (videoUdp != null || audioUdp != null);
 
         public RtspSession(int id, TcpClient tcp, RtspServer server, bool secure = false)
         {

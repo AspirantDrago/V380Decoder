@@ -15,6 +15,7 @@ namespace V380Decoder.src
     public class WebServer
     {
         private readonly V380Client client;
+        private readonly RtspServer rtsp;
         private readonly int httpPort;
         private readonly int rtspPort;
         private readonly bool enableApi;
@@ -41,11 +42,13 @@ namespace V380Decoder.src
             string password,
             string advertisedHttpUrl = null,
             string advertisedRtspUrl = null,
-            string cameraName = null)
+            string cameraName = null,
+            RtspServer rtsp = null)
         {
             this.httpPort = httpPort;
             this.rtspPort = rtspPort;
             this.client = client;
+            this.rtsp = rtsp;
             this.enableApi = enableApi;
             this.enableOnvif = enableOnvif;
             this.enableMjpeg = enableMjpeg;
@@ -169,6 +172,10 @@ namespace V380Decoder.src
                     status = "running",
                     timestamp = DateTime.Now
                 }));
+
+                // Kept under the same --secure Basic/Digest authentication filter.
+                api.MapGet("/api/metrics", () =>
+                    Results.Ok(client.GetMetrics(cameraName, rtsp, httpPort, rtspPort)));
             }
 
             if (enableOnvif)

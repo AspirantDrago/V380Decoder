@@ -40,6 +40,10 @@ namespace V380Decoder.src
             this.cameraName = CameraName.Validate(cameraName);
         }
 
+        public int SessionCount => sessions.Count;
+        public int PlayingSessionCount => sessions.Values.Count(s => s.IsPlaying);
+        public int CompatibilitySessionCount => sessions.Values.Count(s => s.IsPlaying && s.CompatibilityVideo);
+
         public bool IsSecure => secure;
         public string Username => username;
         public string Password => password;

@@ -29,8 +29,8 @@ When `--secure` is not used, authentication is not required. Do not expose an un
 ## Install the Zabbix template
 
 1. In Zabbix 7.4, go to **Data collection → Templates → Import**, and select [zabbix_7.4_v380decoder.yaml](zabbix_7.4_v380decoder.yaml).
-2. Create one Zabbix host per decoder instance and link **V380 Decoder by HTTP**. Configure its interface address to the reachable decoder host/IP. No Zabbix agent or SNMP is required.
-3. On each host, set `{$V380.HTTP.PORT}` to the mapped API port (default `8080`), `{$V380.USER}` to the configured username, and `{$V380.PASSWORD}` to the camera password. Override the last macro at the **host level as Secret text**; do not save real credentials in the template.
+2. Create one Zabbix host per decoder instance and link **V380 Decoder by HTTP**. **Do not add a host interface**: the HTTP agent resolves the decoder address from `{$V380.HOST}`. No Zabbix agent or SNMP is required.
+3. Set `{$V380.HOST}` to the decoder server's reachable IP address or DNS name (for example `192.168.10.11`), and `{$V380.HTTP.PORT}` to the mapped API port (default `8080`). Set `{$V380.USER}` to the configured username and override `{$V380.PASSWORD}` on the **host level as Secret text**. The host macro can be shared at template level if all decoders run on one server. Do not save real credentials in the template.
 4. If using an HTTPS reverse proxy, set `{$V380.SCHEME}` to `https`; adjust port as needed. The default polling interval macro is `{$V380.UPDATE.INTERVAL}=30s`.
 5. Check **Monitoring → Latest data**. The master item `v380.metrics.raw` performs one HTTP request and all 75 other items are dependent on its JSON response.
 

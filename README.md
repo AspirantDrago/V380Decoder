@@ -388,6 +388,26 @@ docker run -d --restart unless-stopped --network host v380decoder --id 12345678 
 The Docker image includes FFmpeg, so H.265 snapshots and MJPEG work without an
 additional package installation.
 
+### Recreate existing Docker containers after an update
+
+For standalone Docker deployments using the same image, use the [recreate script](scripts/recreate_v380.sh).
+It updates `main`, rebuilds the Docker image, and recreates containers using the same
+image ID as the reference container, preserving their Docker configuration.
+If a new container fails to start, the script attempts to restore the original
+containers. Existing containers are retained as stopped backups until startup
+checks pass. This is **not** a verification of live video; check `/api/metrics` after updating.
+
+```sh
+cd /opt/v380
+git pull --ff-only origin main
+sudo ./scripts/recreate_v380.sh
+```
+
+Defaults: source directory `/opt/v380`, reference `v380_58780462`, image
+`v380decoder:latest`. Override them through `V380_DIR`, `V380_REFERENCE`, and
+`V380_IMAGE` environment variables. It intentionally rejects Compose-managed
+containers, unsupported networking configurations, and unsafe mount setups.
+
 ## Acknowledgements
 
 - [prsyahmi/v380](https://github.com/prsyahmi/v380) - Original V380 reverse engineering work

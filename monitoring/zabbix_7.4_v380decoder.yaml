@@ -991,6 +991,150 @@ zabbix_export:
           tags:
             - tag: component
               value: rtsp
+        - uuid: 3b37de70849bd14cebf3651474f2b882
+          name: 'V380: Device type'
+          type: DEPENDENT
+          key: v380.device_type
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.device_type'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 7a4b260f7b182f7ba470a78329706899
+          name: 'V380: Camera type'
+          type: DEPENDENT
+          key: v380.camera_type
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.camera_type'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 2878927d9355a9e93e617d01c9226387
+          name: 'V380: Vendor ID'
+          type: DEPENDENT
+          key: v380.vendor_id
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.vendor_id'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: identity
+        - uuid: 1f62836acf5d3196689eca5e33918ae8
+          name: 'V380: Last authentication duration'
+          type: DEPENDENT
+          key: v380.last_auth_duration_ms
+          value_type: UNSIGNED
+          units: 'ms'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_auth_duration_ms'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: 938401a6e67199a271c9af9af0019704
+          name: 'V380: Last stream login duration'
+          type: DEPENDENT
+          key: v380.last_stream_login_duration_ms
+          value_type: UNSIGNED
+          units: 'ms'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.last_stream_login_duration_ms'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: health
+        - uuid: f75fc2937d262ccf8a1e8d47c7fc3c15
+          name: 'V380: Upstream bitrate (10s)'
+          type: DEPENDENT
+          key: v380.upstream_bitrate_bps_10s
+          value_type: FLOAT
+          units: 'bps'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.upstream_bitrate_bps_10s'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: network
+        - uuid: 87e721728892e0de07623ad667667c74
+          name: 'V380: Upstream packet rate (10s)'
+          type: DEPENDENT
+          key: v380.upstream_packets_per_second_10s
+          value_type: FLOAT
+          units: 'pps'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.upstream_packets_per_second_10s'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: network
+        - uuid: 0731b0206591dc04eaabcf5cc3318252
+          name: 'V380: RTSP video subscribers'
+          type: DEPENDENT
+          key: v380.rtsp_video_subscribers
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.rtsp_video_subscribers'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: rtsp
+        - uuid: 396733a1b2a8e66d3fc7f025cf4a74ef
+          name: 'V380: RTSP audio subscribers'
+          type: DEPENDENT
+          key: v380.rtsp_audio_subscribers
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.rtsp_audio_subscribers'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: rtsp
+        - uuid: 5080608ffc629fc31de722fb2aed4095
+          name: 'V380: RTSP UDP clients'
+          type: DEPENDENT
+          key: v380.rtsp_udp_clients
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.rtsp_udp_clients'
+          master_item:
+            key: v380.metrics.raw
+          tags:
+            - tag: component
+              value: rtsp
       macros:
         - macro: '{$V380.SCHEME}'
           value: 'http'

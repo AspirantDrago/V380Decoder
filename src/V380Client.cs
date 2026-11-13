@@ -8,6 +8,12 @@ namespace V380Decoder.src
     public class V380Client : IDisposable
     {
         public SnapshotManager snapshotManager { get; private set; }
+        private readonly CameraMonitoring monitoring = new();
+
+        internal CameraMetricsSnapshot GetMetrics(string cameraName, RtspServer rtsp, int httpPort, int rtspPort) =>
+            monitoring.Snapshot(deviceId.ToString(), cameraName, ip, port,
+                source == SourceStream.Cloud ? "cloud" : "lan", StreamInfo, deviceInfo,
+                rtsp, httpPort, rtspPort);
         private TcpClient authClient, streamClient;
         private NetworkStream authStream, streamStream;
         private readonly string ip;
@@ -80,13 +86,35 @@ namespace V380Decoder.src
             {
                 try
                 {
+                    monitoring.BeginConnection();
                     int auth = GetAuthTicket(ct);
-                    if (auth == -1) break;
-                    if (auth == 1 && StreamLogin(ct) && StartStream())
+                    if (auth != 1)
                     {
-                        var liveTime = Stopwatch.StartNew();
-                        ReceiveFrames(mode, rtsp, ct);
-                        if (liveTime.Elapsed >= TimeSpan.FromSeconds(30)) retryDelayMs = 1000;
+                        monitoring.AuthenticationFailed(auth == -1);
+                        if (auth == -1) break;
+                    }
+                    else
+                    {
+                        monitoring.Authenticated(deviceVersion);
+                        if (!StreamLogin(ct))
+                        {
+                            monitoring.StreamLoginFailed();
+                        }
+                        else
+                        {
+                            monitoring.SetCommunicationVersion(communicationVersion);
+                            if (!StartStream())
+                            {
+                                monitoring.StreamLoginFailed();
+                            }
+                            else
+                            {
+                                monitoring.Streaming();
+                                var liveTime = Stopwatch.StartNew();
+                                ReceiveFrames(mode, rtsp, ct);
+                                if (liveTime.Elapsed >= TimeSpan.FromSeconds(30)) retryDelayMs = 1000;
+                            }
+                        }
                     }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -95,17 +123,21 @@ namespace V380Decoder.src
                 }
                 catch (Exception ex)
                 {
+                    monitoring.ReceiveError();
                     Console.Error.WriteLine($"[STREAM] {ex.Message}");
                 }
                 finally
                 {
+                    monitoring.Disconnected();
                     CloseStreamConnection();
                 }
                 if (ct.IsCancellationRequested) break;
+                monitoring.Reconnecting();
                 Console.Error.WriteLine($"[STREAM] Reconnecting with fresh authentication in {retryDelayMs / 1000}s");
                 if (ct.WaitHandle.WaitOne(retryDelayMs)) break;
                 retryDelayMs = Math.Min(retryDelayMs * 2, 15000);
             }
+            monitoring.Stopped();
         }
 
         public int GetAuthTicket(CancellationToken ct = default)
@@ -387,6 +419,7 @@ namespace V380Decoder.src
 
                     if (header12[0] != 0x7F)
                     {
+                        monitoring.InvalidHeader();
                         continue;
                     }
 
@@ -397,12 +430,14 @@ namespace V380Decoder.src
 
                     if (payLen == 0 || payLen > 20000 || totalFrame == 0 || curFrame >= totalFrame)
                     {
+                        monitoring.InvalidHeader();
                         Console.Error.WriteLine($"[SKIP] invalid header type=0x{type:X2} total={totalFrame} cur={curFrame} len={payLen}");
                         continue;
                     }
 
                     if (payloadBuf.Length < payLen) payloadBuf = new byte[payLen];
                     CameraResponseReader.ReadExactly(streamClient, payloadBuf, 0, payLen, ct);
+                    monitoring.PacketReceived(payLen);
 
                     if (type == 0x5B)
                     {
@@ -429,6 +464,7 @@ namespace V380Decoder.src
                         continue;
                     }
 
+                    monitoring.UnknownPacket();
                     Console.Error.WriteLine($"[FRAME] unknown type=0x{type:X2} len={payLen}");
                 }
             }
@@ -438,6 +474,7 @@ namespace V380Decoder.src
             }
             catch (Exception ex)
             {
+                monitoring.ReceiveError();
                 Console.Error.WriteLine($"[RECV] {ex.Message}");
             }
         }
@@ -452,6 +489,7 @@ namespace V380Decoder.src
         {
             if (full.Length <= 16)
             {
+                monitoring.VideoDecodeError();
                 Console.Error.WriteLine($"[VIDEO] short frame type=0x{rawType:X2} len={full.Length}");
                 return;
             }
@@ -462,6 +500,7 @@ namespace V380Decoder.src
 
             if (!TryExtractVideoPayload(full, codec, needDecrypt, out byte[] payload))
             {
+                monitoring.VideoDecodeError();
                 Console.Error.WriteLine(
                     $"[VIDEO] no valid {codec} Annex-B payload type=0x{rawType:X2} len={full.Length}");
                 return;
@@ -474,6 +513,9 @@ namespace V380Decoder.src
             bool isKeyframe = rawType is 0x00 or 0x28;
 
             UpdateVideoInfo(payload, codec, frameRate, isKeyframe);
+            monitoring.VideoDecoded(payload.Length, isKeyframe,
+                videoPayloadDecoder.SelectedMode?.ToString() ?? "unknown",
+                videoPayloadDecoder.SelectedHeaderSize, videoPayloadDecoder.LastScore);
             snapshotManager.UpdateFrame(
                 payload, frameWidth, frameheight, isKeyframe, codec);
 
@@ -507,7 +549,11 @@ namespace V380Decoder.src
             RtspServer rtsp,
             Stream stdout)
         {
-            if (full.Length <= 16) return;
+            if (full.Length <= 16)
+            {
+                monitoring.AudioSkipped();
+                return;
+            }
 
             uint frameId = ReadUInt32LE(full, 0);
             ushort frameType = ReadUInt16LE(full, 4);
@@ -519,6 +565,7 @@ namespace V380Decoder.src
             {
                 if (!audioPayloadDecoder.TryDecodeIma(full, needDecrypt, out payload, out bool changed))
                 {
+                    monitoring.AudioSkipped();
                     if (audioPayloadDecoder.HeaderSize == 0 && !reportedExtendedAudio)
                     {
                         Console.Error.WriteLine(
@@ -546,6 +593,9 @@ namespace V380Decoder.src
                         DecryptAudioFrame(payload, payload.Length);
                 }
             }
+
+            monitoring.AudioDecoded(payload.Length,
+                rawType == 0x16 ? "IMA_ADPCM_to_PCMA" : "G711_PCMA");
 
             if (outputMode == OutputMode.Audio)
             {

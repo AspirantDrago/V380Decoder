@@ -19,7 +19,7 @@ zabbix_export:
           history: 1d
           value_type: TEXT
           timeout: 5s
-          url: '{$V380.SCHEME}://{HOST.CONN}:{$V380.HTTP.PORT}/api/metrics'
+          url: '{$V380.SCHEME}://{$V380.HOST}:{$V380.HTTP.PORT}/api/metrics'
           authtype: BASIC
           username: '{$V380.USER}'
           password: '{$V380.PASSWORD}'
@@ -1139,6 +1139,9 @@ zabbix_export:
         - macro: '{$V380.SCHEME}'
           value: 'http'
           description: 'Use https if the decoder API is served through a TLS reverse proxy.'
+        - macro: '{$V380.HOST}'
+          value: ''
+          description: 'Required: IP address or DNS name of the host running V380Decoder. Configure at host level or as a shared template macro.'
         - macro: '{$V380.HTTP.PORT}'
           value: '8080'
           description: 'HTTP port published by this decoder instance.'

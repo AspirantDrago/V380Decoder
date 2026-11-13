@@ -43,6 +43,9 @@ namespace V380Decoder.src
         public int SessionCount => sessions.Count;
         public int PlayingSessionCount => sessions.Values.Count(s => s.IsPlaying);
         public int CompatibilitySessionCount => sessions.Values.Count(s => s.IsPlaying && s.CompatibilityVideo);
+        public int VideoSubscriberCount => sessions.Values.Count(s => s.IsVideoSubscriber);
+        public int AudioSubscriberCount => sessions.Values.Count(s => s.IsAudioSubscriber);
+        public int UdpClientCount => sessions.Values.Count(s => s.IsUdpClient);
 
         public bool IsSecure => secure;
         public string Username => username;

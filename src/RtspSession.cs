@@ -33,6 +33,7 @@ namespace V380Decoder.src
         private uint videoRtpClock, audioRtpClock;
 
         public event Action OnClose;
+        internal bool IsPlaying => playing;
 
         public RtspSession(int id, TcpClient tcp, RtspServer server, bool secure = false)
         {
